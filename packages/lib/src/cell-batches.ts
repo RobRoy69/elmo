@@ -4,7 +4,10 @@ import { z } from "zod";
 
 export const DYREP_CELL_SURFACES = ["chatgpt-search", "google-ai", "perplexity"] as const;
 export const DYREP_CELL_TARGETS = [
-	"dyrep-org", "rob-concepting-nl", "itjing-praktijk-nl", "iching-practice-en",
+	"dyrep-org",
+	"rob-concepting-nl",
+	"itjing-praktijk-nl",
+	"iching-practice-en",
 ] as const;
 export const DYREP_SURFACE_MODELS: Readonly<Record<(typeof DYREP_CELL_SURFACES)[number], string>> = Object.freeze({
 	"chatgpt-search": "chatgpt",
@@ -12,16 +15,23 @@ export const DYREP_SURFACE_MODELS: Readonly<Record<(typeof DYREP_CELL_SURFACES)[
 	perplexity: "perplexity",
 });
 
-const ref = z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const ref = z
+	.string()
+	.trim()
+	.min(1)
+	.max(200)
+	.regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
 const query = z.object({ queryRef: ref, text: z.string().trim().min(1).max(10_000) }).strict();
-export const cellBatchRequestSchema = z.object({
-	targetRef: z.enum(DYREP_CELL_TARGETS),
-	brandName: z.string().trim().min(1).max(500),
-	brandWebsite: z.string().trim().min(1).max(2_000),
-	queries: z.array(query).length(2),
-	surfaces: z.tuple([z.literal("chatgpt-search"), z.literal("google-ai"), z.literal("perplexity")]),
-	repetitions: z.literal(2),
-}).strict();
+export const cellBatchRequestSchema = z
+	.object({
+		targetRef: z.enum(DYREP_CELL_TARGETS),
+		brandName: z.string().trim().min(1).max(500),
+		brandWebsite: z.string().trim().min(1).max(2_000),
+		queries: z.array(query).length(2),
+		surfaces: z.tuple([z.literal("chatgpt-search"), z.literal("google-ai"), z.literal("perplexity")]),
+		repetitions: z.literal(2),
+	})
+	.strict();
 
 export type CellBatchRequest = z.infer<typeof cellBatchRequestSchema>;
 
@@ -31,14 +41,19 @@ export function resolveCellBatchIdempotency(existingHash: string | null, request
 	throw new Error("cell_batch_idempotency_conflict");
 }
 
-export function recoveryAction(status: "pending" | "running" | "complete" | "failed"):
-	"execute" | "fail_outcome_unknown" | "keep_terminal" {
+export function recoveryAction(
+	status: "pending" | "running" | "complete" | "failed",
+): "execute" | "fail_outcome_unknown" | "keep_terminal" {
 	if (status === "pending") return "execute";
 	if (status === "running") return "fail_outcome_unknown";
 	return "keep_terminal";
 }
 
-export function normalizeCellBatchRequest(value: unknown): { body: CellBatchRequest; json: string; requestHash: string } {
+export function normalizeCellBatchRequest(value: unknown): {
+	body: CellBatchRequest;
+	json: string;
+	requestHash: string;
+} {
 	const parsed = cellBatchRequestSchema.parse(value);
 	if (new Set(parsed.queries.map(({ queryRef }) => queryRef)).size !== parsed.queries.length) {
 		throw new Error("cell_batch_duplicate_query_ref");

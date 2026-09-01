@@ -224,7 +224,9 @@ export const cellBatchCells = pgTable(
 	"cell_batch_cells",
 	{
 		id: uuid("id").defaultRandom().primaryKey().notNull(),
-		batchId: uuid("batch_id").references(() => cellBatches.id, { onDelete: "cascade" }).notNull(),
+		batchId: uuid("batch_id")
+			.references(() => cellBatches.id, { onDelete: "cascade" })
+			.notNull(),
 		queryRef: text("query_ref").notNull(),
 		queryText: text("query_text").notNull(),
 		queryOrdinal: integer("query_ordinal").notNull(),
@@ -246,10 +248,16 @@ export const cellBatchCells = pgTable(
 	},
 	(table) => ({
 		coordinateUnique: uniqueIndex("cell_batch_cells_coordinate_unique").on(
-			table.batchId, table.queryRef, table.surface, table.repetition,
+			table.batchId,
+			table.queryRef,
+			table.surface,
+			table.repetition,
 		),
 		batchOrderIdx: index("cell_batch_cells_batch_order_idx").on(
-			table.batchId, table.queryOrdinal, table.surfaceOrdinal, table.repetition,
+			table.batchId,
+			table.queryOrdinal,
+			table.surfaceOrdinal,
+			table.repetition,
 		),
 	}),
 ).enableRLS();

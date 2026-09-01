@@ -36,6 +36,7 @@ import { Route as AuthedReportsRenderReportIdRouteImport } from './routes/_authe
 import { Route as ApiPlausibleEventIndexRouteImport } from './routes/api/plausible/event/index'
 import { Route as ApiV1BrandsIndexRouteImport } from './routes/api/v1/brands/index'
 import { Route as ApiV1BrandsBrandIdRouteImport } from './routes/api/v1/brands/$brandId'
+import { Route as ApiV1CellBatchesIndexRouteImport } from './routes/api/v1/cell-batches/index'
 import { Route as ApiV1CompetitorsIndexRouteImport } from './routes/api/v1/competitors/index'
 import { Route as ApiV1CompetitorsCompetitorIdRouteImport } from './routes/api/v1/competitors/$competitorId'
 import { Route as ApiV1DocsIndexRouteImport } from './routes/api/v1/docs/index'
@@ -48,6 +49,7 @@ import { Route as AuthedAppOrgOrgIndexRouteImport } from './routes/_authed/app/o
 import { Route as AuthedAppOrgOrgNewRouteImport } from './routes/_authed/app/org/$org/new'
 import { Route as AuthedAppOrgOrgSettingsRouteImport } from './routes/_authed/app/org/$org/settings'
 import { Route as ApiPlausibleJsScriptIndexRouteImport } from './routes/api/plausible/js/script/index'
+import { Route as ApiV1CellBatchesBatchIdCellsRouteImport } from './routes/api/v1/cell-batches/$batchId/cells'
 import { Route as ApiV1PromptsPromptIdSnapshotRouteImport } from './routes/api/v1/prompts/$promptId/snapshot'
 import { Route as AuthedAppOrgOrgBrandBrandRouteImport } from './routes/_authed/app/org/$org/brand/$brand'
 import { Route as AuthedAppOrgOrgSettingsIndexRouteImport } from './routes/_authed/app/org/$org/settings/index'
@@ -206,6 +208,11 @@ const ApiV1BrandsBrandIdRoute = ApiV1BrandsBrandIdRouteImport.update({
   path: '/api/v1/brands/$brandId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiV1CellBatchesIndexRoute = ApiV1CellBatchesIndexRouteImport.update({
+  id: '/api/v1/cell-batches/',
+  path: '/api/v1/cell-batches/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiV1CompetitorsIndexRoute = ApiV1CompetitorsIndexRouteImport.update({
   id: '/api/v1/competitors/',
   path: '/api/v1/competitors/',
@@ -266,6 +273,12 @@ const ApiPlausibleJsScriptIndexRoute =
   ApiPlausibleJsScriptIndexRouteImport.update({
     id: '/api/plausible/js/script/',
     path: '/api/plausible/js/script/',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiV1CellBatchesBatchIdCellsRoute =
+  ApiV1CellBatchesBatchIdCellsRouteImport.update({
+    id: '/api/v1/cell-batches/$batchId/cells',
+    path: '/api/v1/cell-batches/$batchId/cells',
     getParentRoute: () => rootRouteImport,
   } as any)
 const ApiV1PromptsPromptIdSnapshotRoute =
@@ -426,12 +439,14 @@ export interface FileRoutesByFullPath {
   '/api/v1/tools/analyze': typeof ApiV1ToolsAnalyzeRoute
   '/api/plausible/event/': typeof ApiPlausibleEventIndexRoute
   '/api/v1/brands/': typeof ApiV1BrandsIndexRoute
+  '/api/v1/cell-batches/': typeof ApiV1CellBatchesIndexRoute
   '/api/v1/competitors/': typeof ApiV1CompetitorsIndexRoute
   '/api/v1/docs/': typeof ApiV1DocsIndexRoute
   '/api/v1/prompts/': typeof ApiV1PromptsIndexRoute
   '/api/v1/reports/': typeof ApiV1ReportsIndexRoute
   '/app/org/$org/new': typeof AuthedAppOrgOrgNewRoute
   '/app/org/$org/settings': typeof AuthedAppOrgOrgSettingsRouteWithChildren
+  '/api/v1/cell-batches/$batchId/cells': typeof ApiV1CellBatchesBatchIdCellsRoute
   '/api/v1/prompts/$promptId/snapshot': typeof ApiV1PromptsPromptIdSnapshotRoute
   '/app/org/$org/': typeof AuthedAppOrgOrgIndexRoute
   '/api/plausible/js/script/': typeof ApiPlausibleJsScriptIndexRoute
@@ -483,11 +498,13 @@ export interface FileRoutesByTo {
   '/api/v1/tools/analyze': typeof ApiV1ToolsAnalyzeRoute
   '/api/plausible/event': typeof ApiPlausibleEventIndexRoute
   '/api/v1/brands': typeof ApiV1BrandsIndexRoute
+  '/api/v1/cell-batches': typeof ApiV1CellBatchesIndexRoute
   '/api/v1/competitors': typeof ApiV1CompetitorsIndexRoute
   '/api/v1/docs': typeof ApiV1DocsIndexRoute
   '/api/v1/prompts': typeof ApiV1PromptsIndexRoute
   '/api/v1/reports': typeof ApiV1ReportsIndexRoute
   '/app/org/$org/new': typeof AuthedAppOrgOrgNewRoute
+  '/api/v1/cell-batches/$batchId/cells': typeof ApiV1CellBatchesBatchIdCellsRoute
   '/api/v1/prompts/$promptId/snapshot': typeof ApiV1PromptsPromptIdSnapshotRoute
   '/app/org/$org': typeof AuthedAppOrgOrgIndexRoute
   '/api/plausible/js/script': typeof ApiPlausibleJsScriptIndexRoute
@@ -544,12 +561,14 @@ export interface FileRoutesById {
   '/api/v1/tools/analyze': typeof ApiV1ToolsAnalyzeRoute
   '/api/plausible/event/': typeof ApiPlausibleEventIndexRoute
   '/api/v1/brands/': typeof ApiV1BrandsIndexRoute
+  '/api/v1/cell-batches/': typeof ApiV1CellBatchesIndexRoute
   '/api/v1/competitors/': typeof ApiV1CompetitorsIndexRoute
   '/api/v1/docs/': typeof ApiV1DocsIndexRoute
   '/api/v1/prompts/': typeof ApiV1PromptsIndexRoute
   '/api/v1/reports/': typeof ApiV1ReportsIndexRoute
   '/_authed/app/org/$org/new': typeof AuthedAppOrgOrgNewRoute
   '/_authed/app/org/$org/settings': typeof AuthedAppOrgOrgSettingsRouteWithChildren
+  '/api/v1/cell-batches/$batchId/cells': typeof ApiV1CellBatchesBatchIdCellsRoute
   '/api/v1/prompts/$promptId/snapshot': typeof ApiV1PromptsPromptIdSnapshotRoute
   '/_authed/app/org/$org/': typeof AuthedAppOrgOrgIndexRoute
   '/api/plausible/js/script/': typeof ApiPlausibleJsScriptIndexRoute
@@ -607,12 +626,14 @@ export interface FileRouteTypes {
     | '/api/v1/tools/analyze'
     | '/api/plausible/event/'
     | '/api/v1/brands/'
+    | '/api/v1/cell-batches/'
     | '/api/v1/competitors/'
     | '/api/v1/docs/'
     | '/api/v1/prompts/'
     | '/api/v1/reports/'
     | '/app/org/$org/new'
     | '/app/org/$org/settings'
+    | '/api/v1/cell-batches/$batchId/cells'
     | '/api/v1/prompts/$promptId/snapshot'
     | '/app/org/$org/'
     | '/api/plausible/js/script/'
@@ -664,11 +685,13 @@ export interface FileRouteTypes {
     | '/api/v1/tools/analyze'
     | '/api/plausible/event'
     | '/api/v1/brands'
+    | '/api/v1/cell-batches'
     | '/api/v1/competitors'
     | '/api/v1/docs'
     | '/api/v1/prompts'
     | '/api/v1/reports'
     | '/app/org/$org/new'
+    | '/api/v1/cell-batches/$batchId/cells'
     | '/api/v1/prompts/$promptId/snapshot'
     | '/app/org/$org'
     | '/api/plausible/js/script'
@@ -724,12 +747,14 @@ export interface FileRouteTypes {
     | '/api/v1/tools/analyze'
     | '/api/plausible/event/'
     | '/api/v1/brands/'
+    | '/api/v1/cell-batches/'
     | '/api/v1/competitors/'
     | '/api/v1/docs/'
     | '/api/v1/prompts/'
     | '/api/v1/reports/'
     | '/_authed/app/org/$org/new'
     | '/_authed/app/org/$org/settings'
+    | '/api/v1/cell-batches/$batchId/cells'
     | '/api/v1/prompts/$promptId/snapshot'
     | '/_authed/app/org/$org/'
     | '/api/plausible/js/script/'
@@ -774,10 +799,12 @@ export interface RootRouteChildren {
   ApiV1ToolsAnalyzeRoute: typeof ApiV1ToolsAnalyzeRoute
   ApiPlausibleEventIndexRoute: typeof ApiPlausibleEventIndexRoute
   ApiV1BrandsIndexRoute: typeof ApiV1BrandsIndexRoute
+  ApiV1CellBatchesIndexRoute: typeof ApiV1CellBatchesIndexRoute
   ApiV1CompetitorsIndexRoute: typeof ApiV1CompetitorsIndexRoute
   ApiV1DocsIndexRoute: typeof ApiV1DocsIndexRoute
   ApiV1PromptsIndexRoute: typeof ApiV1PromptsIndexRoute
   ApiV1ReportsIndexRoute: typeof ApiV1ReportsIndexRoute
+  ApiV1CellBatchesBatchIdCellsRoute: typeof ApiV1CellBatchesBatchIdCellsRoute
   ApiPlausibleJsScriptIndexRoute: typeof ApiPlausibleJsScriptIndexRoute
 }
 
@@ -972,6 +999,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiV1BrandsBrandIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/v1/cell-batches/': {
+      id: '/api/v1/cell-batches/'
+      path: '/api/v1/cell-batches'
+      fullPath: '/api/v1/cell-batches/'
+      preLoaderRoute: typeof ApiV1CellBatchesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/v1/competitors/': {
       id: '/api/v1/competitors/'
       path: '/api/v1/competitors'
@@ -1054,6 +1088,13 @@ declare module '@tanstack/react-router' {
       path: '/api/plausible/js/script'
       fullPath: '/api/plausible/js/script/'
       preLoaderRoute: typeof ApiPlausibleJsScriptIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/v1/cell-batches/$batchId/cells': {
+      id: '/api/v1/cell-batches/$batchId/cells'
+      path: '/api/v1/cell-batches/$batchId/cells'
+      fullPath: '/api/v1/cell-batches/$batchId/cells'
+      preLoaderRoute: typeof ApiV1CellBatchesBatchIdCellsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/v1/prompts/$promptId/snapshot': {
@@ -1395,10 +1436,12 @@ const rootRouteChildren: RootRouteChildren = {
   ApiV1ToolsAnalyzeRoute: ApiV1ToolsAnalyzeRoute,
   ApiPlausibleEventIndexRoute: ApiPlausibleEventIndexRoute,
   ApiV1BrandsIndexRoute: ApiV1BrandsIndexRoute,
+  ApiV1CellBatchesIndexRoute: ApiV1CellBatchesIndexRoute,
   ApiV1CompetitorsIndexRoute: ApiV1CompetitorsIndexRoute,
   ApiV1DocsIndexRoute: ApiV1DocsIndexRoute,
   ApiV1PromptsIndexRoute: ApiV1PromptsIndexRoute,
   ApiV1ReportsIndexRoute: ApiV1ReportsIndexRoute,
+  ApiV1CellBatchesBatchIdCellsRoute: ApiV1CellBatchesBatchIdCellsRoute,
   ApiPlausibleJsScriptIndexRoute: ApiPlausibleJsScriptIndexRoute,
 }
 export const routeTree = rootRouteImport
