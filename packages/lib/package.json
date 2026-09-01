@@ -29,6 +29,7 @@
 		"./bulk-prompts": "./src/bulk-prompts.ts",
 		"./website-excerpt": "./src/website-excerpt.ts",
 		"./report-metrics": "./src/report-metrics.ts",
+		"./cell-batches": "./src/cell-batches.ts",
 		"./secrets": "./src/secrets/index.ts",
 		"./providers": "./src/providers/index.ts",
 		"./providers/types": "./src/providers/types.ts",

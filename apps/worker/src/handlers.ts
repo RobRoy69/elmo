@@ -4,6 +4,7 @@ import type { OnboardingSuggestion } from "@workspace/lib/onboarding";
 import type { Job, PgBoss } from "pg-boss";
 import { type AnalyzeBrandData, analyzeBrandJob } from "./jobs/analyze-brand";
 import { type GenerateReportData, generateReportJob } from "./jobs/generate-report";
+import { type ProcessCellBatchData, processCellBatchJob } from "./jobs/process-cell-batch";
 import { type ProcessPromptData, processPromptJob } from "./jobs/process-prompt";
 import { type ScheduleMaintenanceData, scheduleMaintenanceJob } from "./jobs/schedule-maintenance";
 import { type SyncAuth0MembershipsData, syncAuth0MembershipsJob } from "./jobs/sync-auth0-memberships";
@@ -38,6 +39,12 @@ export async function registerHandlers(boss: PgBoss): Promise<void> {
 	console.log("Registered handler: process-prompt");
 
 	if (getDeployment().features.reportGeneration) {
+		await boss.work<ProcessCellBatchData>(
+			"process-cell-batch",
+			{ localConcurrency: 2 },
+			withSentry("process-cell-batch", processCellBatchJob),
+		);
+		console.log("Registered handler: process-cell-batch");
 		await boss.work<GenerateReportData>(
 			"generate-report",
 			{ localConcurrency: 2 },

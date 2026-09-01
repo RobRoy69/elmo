@@ -45,6 +45,12 @@ async function main() {
 		expireInSeconds: 60 * 15, // 15 minute timeout
 	});
 	if (getDeployment().features.reportGeneration) {
+		await boss.createQueue("process-cell-batch", {
+			retryLimit: 1,
+			retryDelay: 30,
+			retryBackoff: false,
+			expireInSeconds: 60 * 60,
+		});
 		await boss.createQueue("generate-report", {
 			retryLimit: 3,
 			retryDelay: 60,

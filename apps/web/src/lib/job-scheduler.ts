@@ -226,3 +226,22 @@ export async function sendReportJob(
 		return false;
 	}
 }
+
+export async function sendCellBatchJob(batchId: string): Promise<boolean> {
+	try {
+		const boss = await getBoss();
+		await boss.send("process-cell-batch", { batchId }, {
+			singletonKey: `cell-batch-${batchId}`,
+			singletonSeconds: 24 * 60 * 60,
+			retryLimit: 1,
+			retryDelay: 30,
+			retryBackoff: false,
+			expireInSeconds: 60 * 60,
+		});
+		console.log(`Sent cell batch job for ${batchId}`);
+		return true;
+	} catch (error) {
+		console.error(`Failed to send cell batch job for ${batchId}:`, error);
+		return false;
+	}
+}
