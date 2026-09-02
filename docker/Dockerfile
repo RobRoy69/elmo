@@ -4,7 +4,8 @@
 # Base stage with Node.js. The Alpine 3.23 repository supplies OpenSSL 3.5.8-r0;
 # the exact image index keeps the build reproducible across supported platforms.
 FROM node:24.20.0-alpine3.23@sha256:0388af2af070cd4736a1567cfed02469ba117848845b4165d87a333edb53d2ca AS base
-RUN corepack enable pnpm
+RUN apk add --no-cache --upgrade libcrypto3=3.5.8-r0 libssl3=3.5.8-r0 \
+	&& corepack enable pnpm
 
 # Dependencies stage
 FROM base AS deps
@@ -68,7 +69,7 @@ RUN cp -r /app/packages/lib/src/db/migrations /deploy/migrate/migrations
 # Runtime source. Remove package-management and interactive shell entrypoints
 # after the last RUN instruction while retaining Alpine's installed-package
 # database so SBOM scanners can still identify every supplied library.
-FROM node:24.20.0-alpine3.23@sha256:0388af2af070cd4736a1567cfed02469ba117848845b4165d87a333edb53d2ca AS runtime
+FROM base AS runtime
 RUN rm -rf /usr/local/lib/node_modules \
 	&& rm -f /usr/local/bin/corepack /usr/local/bin/docker-entrypoint.sh \
 		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn \
