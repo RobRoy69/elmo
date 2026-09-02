@@ -27,6 +27,11 @@ jobs:
       - name: Checkout candidate
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
+      - name: Setup Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+
       - name: Install pinned scanners
         shell: bash
         run: |
@@ -55,6 +60,13 @@ jobs:
 
           tools/syft version | tee evidence/syft-version.txt
           tools/grype version | tee evidence/grype-version.txt
+
+      - name: Run Linux release script tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack pnpm test:scripts | tee evidence/linux-script-tests.txt
 
       - name: Build three local candidate images
         shell: bash
