@@ -2,9 +2,8 @@
 # Supports: web app (Nitro server) and worker
 
 # Base stage with Node.js
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS base
+FROM node:24.20.0-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS base
 RUN corepack enable pnpm
-RUN apk add --no-cache curl
 
 # Dependencies stage
 FROM base AS deps
@@ -56,16 +55,13 @@ ENV VITE_DEPLOYMENT_MODE=${VITE_DEPLOYMENT_MODE}
 RUN pnpm --filter @workspace/web build
 
 # Create pruned standalone deployments (only each package's own deps)
-# --legacy: allows deploy without inject-workspace-packages (which breaks Alpine Docker builds)
+# --legacy: deploy without changing the workspace's existing package-link layout.
 RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
 RUN pnpm --filter @workspace/lib deploy --prod --legacy /deploy/lib
 
 # Runtime stage: keep build tooling and package managers outside final images.
-FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime
-RUN apk upgrade --no-cache \
-    "libcrypto3=3.5.8-r0" \
-    "libssl3=3.5.8-r0" \
-    && rm -rf /usr/local/lib/node_modules/npm \
+FROM node:24.20.0-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
+RUN rm -rf /usr/local/lib/node_modules/npm \
     && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Runner stage for web app (Nitro)
