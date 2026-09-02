@@ -61,60 +61,41 @@ RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
 RUN pnpm --filter @workspace/lib deploy --prod --legacy /deploy/lib
 RUN cp /app/apps/worker/dist-runtime/index.mjs /deploy/worker/index.mjs
 
-# Runtime stage: keep build tooling and package managers outside final images.
-FROM node:24.20.0-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
-RUN rm -rf /usr/local/lib/node_modules/npm \
-    && rm -f /usr/local/bin/npm /usr/local/bin/npx
-
 # Runner stage for web app (Nitro)
-FROM runtime AS web
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS web
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 elmo
-
-# Copy entrypoint script
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 # Copy Nitro output - this is the entire server bundle
-COPY --from=builder --chown=elmo:nodejs /app/apps/web/.output ./.output
+COPY --from=builder --chown=65532:65532 /app/apps/web/.output ./.output
 
-USER elmo
+USER 65532:65532
 
 EXPOSE 3000
 ENV PORT=3000
 ENV HOST="0.0.0.0"
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["node", ".output/server/index.mjs"]
+CMD [".output/server/index.mjs"]
 
 # Migration stage — applies checked-in migrations then exits
-FROM runtime AS migrate
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS migrate
 WORKDIR /app
 
-COPY --from=builder /deploy/lib ./
+COPY --from=builder --chown=65532:65532 /deploy/lib ./
 
-CMD ["node", "--experimental-strip-types", "scripts/migrate.mts"]
+USER 65532:65532
+
+CMD ["--experimental-strip-types", "scripts/migrate.mts"]
 
 # Worker stage
-FROM runtime AS worker
+FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS worker
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 worker
+COPY --from=builder --chown=65532:65532 /deploy/worker ./
 
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+USER 65532:65532
 
-COPY --from=builder --chown=worker:nodejs /deploy/worker ./
-
-USER worker
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["node", "index.mjs"]
+CMD ["index.mjs"]
