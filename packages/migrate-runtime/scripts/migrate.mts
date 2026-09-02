@@ -10,9 +10,7 @@ if (!databaseUrl) {
 	process.exitCode = 1;
 } else {
 	const pool = new Pool({ connectionString: databaseUrl });
-	const migrationsFolder = fileURLToPath(
-		new URL("../src/db/migrations", import.meta.url),
-	);
+	const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
 	try {
 		await migrate(drizzle(pool), { migrationsFolder });

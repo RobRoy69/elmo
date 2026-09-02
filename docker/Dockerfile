@@ -17,6 +17,7 @@ COPY packages/ui/package.json ./packages/ui/
 COPY packages/config/package.json ./packages/config/
 COPY packages/lib/package.json ./packages/lib/
 COPY packages/local/package.json ./packages/local/
+COPY packages/migrate-runtime/package.json ./packages/migrate-runtime/
 COPY packages/whitelabel/package.json ./packages/whitelabel/
 COPY packages/cloud/package.json ./packages/cloud/
 COPY packages/deployment/package.json ./packages/deployment/
@@ -38,6 +39,7 @@ COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY --from=deps /app/packages/config/node_modules ./packages/config/node_modules
 COPY --from=deps /app/packages/lib/node_modules ./packages/lib/node_modules
 COPY --from=deps /app/packages/local/node_modules ./packages/local/node_modules
+COPY --from=deps /app/packages/migrate-runtime/node_modules ./packages/migrate-runtime/node_modules
 COPY --from=deps /app/packages/whitelabel/node_modules ./packages/whitelabel/node_modules
 COPY --from=deps /app/packages/cloud/node_modules ./packages/cloud/node_modules
 COPY --from=deps /app/packages/deployment/node_modules ./packages/deployment/node_modules
@@ -58,8 +60,9 @@ RUN pnpm --filter @workspace/worker build:runtime
 # Create pruned standalone deployments (only each package's own deps)
 # --legacy: deploy without changing the workspace's existing package-link layout.
 RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
-RUN pnpm --filter @workspace/lib deploy --prod --legacy /deploy/lib
+RUN pnpm --filter @workspace/migrate-runtime deploy --prod --legacy /deploy/migrate
 RUN cp /app/apps/worker/dist-runtime/index.mjs /deploy/worker/index.mjs
+RUN cp -r /app/packages/lib/src/db/migrations /deploy/migrate/migrations
 
 # Runner stage for web app (Nitro)
 FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS web
@@ -82,7 +85,7 @@ CMD [".output/server/index.mjs"]
 FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS migrate
 WORKDIR /app
 
-COPY --from=builder --chown=65532:65532 /deploy/lib ./
+COPY --from=builder --chown=65532:65532 /deploy/migrate ./
 
 USER 65532:65532
 
