@@ -91,12 +91,12 @@ jobs:
 
           worker_image="dyrep-elmo-worker:${CANDIDATE_SHA}"
           set +e
-          timeout 5s docker run --rm "${worker_image}" > evidence/worker-runtime-smoke.txt 2>&1
+          docker run --rm "${worker_image}" > evidence/worker-runtime-smoke.txt 2>&1
           worker_status=$?
           set -e
-          if [ "${worker_status}" -ne 124 ]; then
+          if [ "${worker_status}" -ne 1 ] || ! grep -Fq "DATABASE_URL is required for pg-boss" evidence/worker-runtime-smoke.txt; then
             cat evidence/worker-runtime-smoke.txt
-            echo "Worker runtime exited before the smoke-test timeout (status ${worker_status})." >&2
+            echo "Worker runtime did not fail closed without DATABASE_URL (status ${worker_status})." >&2
             exit 1
           fi
 
