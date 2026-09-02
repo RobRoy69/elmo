@@ -33,24 +33,16 @@ function resolveExport(specifier) {
 		throw new Error(`Unknown workspace package: ${name}`);
 	}
 
-	const exportKey =
-		subpathParts.length === 0 ? "." : `./${subpathParts.join("/")}`;
+	const exportKey = subpathParts.length === 0 ? "." : `./${subpathParts.join("/")}`;
 	const exports = workspacePackage.manifest.exports;
-	let target =
-		typeof exports === "string" && exportKey === "."
-			? exports
-			: exports?.[exportKey];
+	let target = typeof exports === "string" && exportKey === "." ? exports : exports?.[exportKey];
 
 	if (!target && exports && typeof exports === "object") {
 		for (const [pattern, patternTarget] of Object.entries(exports)) {
 			if (!pattern.includes("*") || typeof patternTarget !== "string") continue;
 			const [prefix, suffix] = pattern.split("*");
-			if (!exportKey.startsWith(prefix) || !exportKey.endsWith(suffix))
-				continue;
-			const matched = exportKey.slice(
-				prefix.length,
-				exportKey.length - suffix.length,
-			);
+			if (!exportKey.startsWith(prefix) || !exportKey.endsWith(suffix)) continue;
+			const matched = exportKey.slice(prefix.length, exportKey.length - suffix.length);
 			target = patternTarget.replace("*", matched);
 			break;
 		}
@@ -79,12 +71,9 @@ await build({
 		{
 			name: "bundle-workspace-packages",
 			setup(buildContext) {
-				buildContext.onResolve(
-					{ filter: /^@workspace\// },
-					({ path: specifier }) => ({
-						path: resolveExport(specifier),
-					}),
-				);
+				buildContext.onResolve({ filter: /^@workspace\// }, ({ path: specifier }) => ({
+					path: resolveExport(specifier),
+				}));
 			},
 		},
 	],
