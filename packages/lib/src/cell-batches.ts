@@ -9,6 +9,14 @@ export const DYREP_CELL_TARGETS = [
 	"itjing-praktijk-nl",
 	"iching-practice-en",
 ] as const;
+export type DyrepCellTarget = (typeof DYREP_CELL_TARGETS)[number];
+
+export const DYREP_CELL_TARGET_WEBSITES: Readonly<Record<DyrepCellTarget, string>> = Object.freeze({
+	"dyrep-org": "https://dyrep.org",
+	"rob-concepting-nl": "https://rob-concepting.com",
+	"itjing-praktijk-nl": "https://i-tjing-praktijk.com",
+	"iching-practice-en": "https://i-ching-practice.com",
+});
 export const DYREP_SURFACE_MODELS: Readonly<Record<(typeof DYREP_CELL_SURFACES)[number], string>> = Object.freeze({
 	"chatgpt-search": "chatgpt",
 	"google-ai": "google-ai-mode",
@@ -34,6 +42,65 @@ export const cellBatchRequestSchema = z
 	.strict();
 
 export type CellBatchRequest = z.infer<typeof cellBatchRequestSchema>;
+
+export type CellBatchTargetBindingFailure =
+	| "deployment_target_missing"
+	| "deployment_target_invalid"
+	| "target_mismatch"
+	| "target_website_mismatch";
+
+function isDyrepCellTarget(value: string): value is DyrepCellTarget {
+	return DYREP_CELL_TARGETS.some((target) => target === value);
+}
+
+export function canonicalizeCellBatchWebsite(targetRef: DyrepCellTarget, value: string): string {
+	const canonical = DYREP_CELL_TARGET_WEBSITES[targetRef];
+	let website: URL;
+	try {
+		website = new URL(value);
+	} catch {
+		throw new Error("cell_batch_target_website_mismatch");
+	}
+	if (
+		website.protocol !== "https:" ||
+		website.username ||
+		website.password ||
+		website.origin !== canonical ||
+		(website.pathname !== "" && website.pathname !== "/") ||
+		website.search ||
+		website.hash
+	) {
+		throw new Error("cell_batch_target_website_mismatch");
+	}
+	return canonical;
+}
+
+export function validateCellBatchTargetBinding(
+	deploymentTarget: string | undefined,
+	targetRef: string,
+	brandWebsite: string,
+): CellBatchTargetBindingFailure | null {
+	if (!deploymentTarget) return "deployment_target_missing";
+	if (!isDyrepCellTarget(deploymentTarget)) return "deployment_target_invalid";
+	if (targetRef !== deploymentTarget) return "target_mismatch";
+	try {
+		canonicalizeCellBatchWebsite(deploymentTarget, brandWebsite);
+	} catch {
+		return "target_website_mismatch";
+	}
+	return null;
+}
+
+export async function executeCellBatchTargetBound<T>(
+	deploymentTarget: string | undefined,
+	targetRef: string,
+	brandWebsite: string,
+	execute: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; bindingFailure: CellBatchTargetBindingFailure }> {
+	const bindingFailure = validateCellBatchTargetBinding(deploymentTarget, targetRef, brandWebsite);
+	if (bindingFailure) return { ok: false, bindingFailure };
+	return { ok: true, value: await execute() };
+}
 
 export function resolveCellBatchIdempotency(existingHash: string | null, requestHash: string): "create" | "replay" {
 	if (existingHash === null) return "create";
@@ -61,7 +128,7 @@ export function normalizeCellBatchRequest(value: unknown): {
 	const body: CellBatchRequest = {
 		targetRef: parsed.targetRef,
 		brandName: parsed.brandName,
-		brandWebsite: parsed.brandWebsite,
+		brandWebsite: canonicalizeCellBatchWebsite(parsed.targetRef, parsed.brandWebsite),
 		queries: parsed.queries.map(({ queryRef, text }) => ({ queryRef, text })),
 		surfaces: ["chatgpt-search", "google-ai", "perplexity"],
 		repetitions: 2,

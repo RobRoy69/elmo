@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+	canonicalizeCellBatchWebsite,
 	DYREP_CELL_SURFACES,
+	DYREP_CELL_TARGET_WEBSITES,
+	executeCellBatchTargetBound,
 	normalizeCellBatchRequest,
 	planCellCoordinates,
 	recoveryAction,
 	resolveCellBatchIdempotency,
 	resolveCellSurfaceConfigs,
+	validateCellBatchTargetBinding,
 } from "./cell-batches";
 
 const request = {
@@ -70,5 +74,61 @@ describe("DyReP cell-batchcontract", () => {
 		expect(() => resolveCellSurfaceConfigs([...configs, configs[0]])).toThrow(
 			"cell_batch_surface_binding_invalid:chatgpt-search",
 		);
+	});
+
+	it("bindt ieder target uitsluitend aan zijn canonieke website", () => {
+		for (const [targetRef, website] of Object.entries(DYREP_CELL_TARGET_WEBSITES)) {
+			expect(validateCellBatchTargetBinding(targetRef, targetRef, website)).toBeNull();
+			expect(canonicalizeCellBatchWebsite(targetRef as keyof typeof DYREP_CELL_TARGET_WEBSITES, `${website}/`)).toBe(
+				website,
+			);
+			for (const [otherTarget, otherWebsite] of Object.entries(DYREP_CELL_TARGET_WEBSITES)) {
+				if (otherTarget === targetRef) continue;
+				expect(validateCellBatchTargetBinding(targetRef, targetRef, otherWebsite)).toBe("target_website_mismatch");
+			}
+		}
+	});
+
+	it("weigert ontbrekende, onbekende en cross-target deploymentbindingen", () => {
+		expect(validateCellBatchTargetBinding(undefined, request.targetRef, request.brandWebsite)).toBe(
+			"deployment_target_missing",
+		);
+		expect(validateCellBatchTargetBinding("unknown", request.targetRef, request.brandWebsite)).toBe(
+			"deployment_target_invalid",
+		);
+		expect(validateCellBatchTargetBinding("rob-concepting-nl", request.targetRef, request.brandWebsite)).toBe(
+			"target_mismatch",
+		);
+	});
+
+	it("weigert websitevarianten buiten de canonieke origin", () => {
+		for (const website of [
+			"http://dyrep.org",
+			"https://www.dyrep.org",
+			"https://dyrep.org:444",
+			"https://dyrep.org/path",
+			"https://dyrep.org?query=1",
+			"https://dyrep.org#fragment",
+			"https://user:secret@dyrep.org",
+			"not-a-url",
+		]) {
+			expect(validateCellBatchTargetBinding("dyrep-org", "dyrep-org", website)).toBe("target_website_mismatch");
+		}
+	});
+
+	it("roept de provider nooit aan buiten de deploymentbinding", async () => {
+		const providerCall = vi.fn(async () => "provider-result");
+		const denied = await executeCellBatchTargetBound(
+			"dyrep-org",
+			"rob-concepting-nl",
+			"https://rob-concepting.com",
+			providerCall,
+		);
+		expect(denied).toEqual({ ok: false, bindingFailure: "target_mismatch" });
+		expect(providerCall).not.toHaveBeenCalled();
+
+		const allowed = await executeCellBatchTargetBound("dyrep-org", "dyrep-org", "https://dyrep.org", providerCall);
+		expect(allowed).toEqual({ ok: true, value: "provider-result" });
+		expect(providerCall).toHaveBeenCalledOnce();
 	});
 });

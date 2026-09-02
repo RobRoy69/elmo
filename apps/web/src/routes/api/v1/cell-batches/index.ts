@@ -5,6 +5,7 @@ import {
 	planCellCoordinates,
 	resolveCellBatchIdempotency,
 	resolveCellSurfaceConfigs,
+	validateCellBatchTargetBinding,
 } from "@workspace/lib/cell-batches";
 import { db } from "@workspace/lib/db/db";
 import { cellBatchCells, cellBatches } from "@workspace/lib/db/schema";
@@ -36,8 +37,16 @@ export const Route = createFileRoute("/api/v1/cell-batches/")({
 					}
 					const deploymentTarget = process.env.DYREP_GEO_TARGET_REF;
 					if (!deploymentTarget) throw new ApiError(503, "Unavailable", "Deployment target is not configured");
-					if (body.targetRef !== deploymentTarget)
+					const bindingFailure = validateCellBatchTargetBinding(deploymentTarget, body.targetRef, body.brandWebsite);
+					if (bindingFailure === "deployment_target_invalid") {
+						throw new ApiError(503, "Unavailable", "Deployment target is invalid");
+					}
+					if (bindingFailure === "target_mismatch") {
 						throw new ApiError(403, "target_mismatch", "Target differs from deployment");
+					}
+					if (bindingFailure === "target_website_mismatch") {
+						throw new ApiError(403, "target_website_mismatch", "Website differs from target configuration");
+					}
 					const normalized = normalizeCellBatchRequest(body);
 					const configs = resolveCellSurfaceConfigs(parseScrapeTargets(process.env.SCRAPE_TARGETS));
 					const planned = planCellCoordinates(normalized.body, configs);
