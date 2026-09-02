@@ -2,7 +2,7 @@
 # Supports: web app (Nitro server) and worker
 
 # Base stage with Node.js
-FROM node:24-alpine AS base
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS base
 RUN corepack enable pnpm
 RUN apk add --no-cache curl
 
@@ -57,11 +57,19 @@ RUN pnpm --filter @workspace/web build
 
 # Create pruned standalone deployments (only each package's own deps)
 # --legacy: allows deploy without inject-workspace-packages (which breaks Alpine Docker builds)
-RUN pnpm --filter @workspace/worker deploy --legacy /deploy/worker
-RUN pnpm --filter @workspace/lib deploy --legacy /deploy/lib
+RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
+RUN pnpm --filter @workspace/lib deploy --prod --legacy /deploy/lib
+
+# Runtime stage: keep build tooling and package managers outside final images.
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS runtime
+RUN apk upgrade --no-cache \
+    "libcrypto3=3.5.8-r0" \
+    "libssl3=3.5.8-r0" \
+    && rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx
 
 # Runner stage for web app (Nitro)
-FROM base AS web
+FROM runtime AS web
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -86,16 +94,16 @@ ENV HOST="0.0.0.0"
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", ".output/server/index.mjs"]
 
-# Migration stage — runs drizzle-kit migrate then exits
-FROM base AS migrate
+# Migration stage — applies checked-in migrations then exits
+FROM runtime AS migrate
 WORKDIR /app
 
 COPY --from=builder /deploy/lib ./
 
-CMD ["npx", "drizzle-kit", "migrate"]
+CMD ["node", "--experimental-strip-types", "scripts/migrate.mts"]
 
 # Worker stage
-FROM base AS worker
+FROM runtime AS worker
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -111,4 +119,4 @@ COPY --from=builder --chown=worker:nodejs /deploy/worker ./
 USER worker
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["node", "--experimental-strip-types", "src/index.ts"]

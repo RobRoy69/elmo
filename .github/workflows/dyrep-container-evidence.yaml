@@ -84,6 +84,33 @@ jobs:
               | tee "evidence/${target}-image-id.txt"
           done
 
+      - name: Verify minimal runtime entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          worker_image="dyrep-elmo-worker:${CANDIDATE_SHA}"
+          set +e
+          timeout 5s docker run --rm "${worker_image}" > evidence/worker-runtime-smoke.txt 2>&1
+          worker_status=$?
+          set -e
+          if [ "${worker_status}" -ne 124 ]; then
+            cat evidence/worker-runtime-smoke.txt
+            echo "Worker runtime exited before the smoke-test timeout (status ${worker_status})." >&2
+            exit 1
+          fi
+
+          migrate_image="dyrep-elmo-migrate:${CANDIDATE_SHA}"
+          set +e
+          docker run --rm "${migrate_image}" > evidence/migrate-runtime-smoke.txt 2>&1
+          migrate_status=$?
+          set -e
+          if [ "${migrate_status}" -ne 1 ] || ! grep -Fq "DATABASE_URL is required" evidence/migrate-runtime-smoke.txt; then
+            cat evidence/migrate-runtime-smoke.txt
+            echo "Migrate runtime did not fail closed without DATABASE_URL (status ${migrate_status})." >&2
+            exit 1
+          fi
+
       - name: Generate SBOMs and vulnerability reports
         shell: bash
         run: |
