@@ -21,6 +21,7 @@ jobs:
     env:
       SYFT_VERSION: 1.51.1
       GRYPE_VERSION: 0.118.0
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
     steps:
       - name: Checkout candidate
@@ -60,7 +61,7 @@ jobs:
         run: |
           set -euo pipefail
           for target in web worker migrate; do
-            image="dyrep-elmo-${target}:${GITHUB_SHA}"
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
             docker build \
               --file docker/Dockerfile \
               --target "${target}" \
@@ -76,10 +77,11 @@ jobs:
         run: |
           set -euo pipefail
           scan_exit=0
+          tools/grype db update
           tools/grype db status -o json > evidence/grype-db-status.json
 
           for target in web worker migrate; do
-            image="dyrep-elmo-${target}:${GITHUB_SHA}"
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
             sbom="evidence/${target}.spdx.json"
             report="evidence/${target}-grype.json"
 
@@ -95,7 +97,7 @@ jobs:
           {
             echo '## DyReP container evidence'
             echo
-            echo "Candidate: \`${GITHUB_SHA}\`"
+            echo "Candidate: \`${CANDIDATE_SHA}\`"
             echo
             echo 'No image was pushed to a registry.'
             echo
@@ -108,7 +110,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: dyrep-elmo-container-evidence-${{ github.sha }}
+          name: dyrep-elmo-container-evidence-${{ env.CANDIDATE_SHA }}
           path: evidence/
           if-no-files-found: error
           retention-days: 14
