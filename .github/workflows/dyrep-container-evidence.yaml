@@ -170,7 +170,9 @@ jobs:
 
           docker run --rm --network host "${postgres_image}" \
             pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
-            > evidence/migrate-schema-first.sql
+            > evidence/migrate-schema-first.raw.sql
+          sed '/^\\restrict /d; /^\\unrestrict /d' \
+            evidence/migrate-schema-first.raw.sql > evidence/migrate-schema-first.sql
           docker run --rm --network host "${postgres_image}" \
             psql "${database_url}" --tuples-only --no-align \
             --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
@@ -198,7 +200,9 @@ jobs:
 
           docker run --rm --network host "${postgres_image}" \
             pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
-            > evidence/migrate-schema-second.sql
+            > evidence/migrate-schema-second.raw.sql
+          sed '/^\\restrict /d; /^\\unrestrict /d' \
+            evidence/migrate-schema-second.raw.sql > evidence/migrate-schema-second.sql
           docker run --rm --network host "${postgres_image}" \
             psql "${database_url}" --tuples-only --no-align \
             --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
