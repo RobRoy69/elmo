@@ -89,6 +89,24 @@ jobs:
         run: |
           set -euo pipefail
 
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
+            container="$(docker create "${image}")"
+            docker export "${container}" | tar --list > "evidence/${target}-runtime-files.txt"
+            docker rm "${container}" >/dev/null
+
+            for forbidden in \
+              bin/ash bin/busybox bin/sh sbin/apk \
+              usr/local/bin/corepack usr/local/bin/npm usr/local/bin/npx \
+              usr/local/bin/yarn usr/local/bin/yarnpkg; do
+              if grep --fixed-strings --line-regexp --quiet \
+                "${forbidden}" "evidence/${target}-runtime-files.txt"; then
+                echo "Forbidden runtime tool found in ${target}: ${forbidden}" >&2
+                exit 1
+              fi
+            done
+          done
+
           worker_image="dyrep-elmo-worker:${CANDIDATE_SHA}"
           set +e
           docker run --rm "${worker_image}" > evidence/worker-runtime-smoke.txt 2>&1

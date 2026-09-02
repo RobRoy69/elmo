@@ -1,8 +1,9 @@
 # Elmo 
 # Supports: web app (Nitro server) and worker
 
-# Base stage with Node.js
-FROM node:24.20.0-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS base
+# Base stage with Node.js. The Alpine 3.23 repository supplies OpenSSL 3.5.8-r0;
+# the exact image index keeps the build reproducible across supported platforms.
+FROM node:24.20.0-alpine3.23@sha256:0388af2af070cd4736a1567cfed02469ba117848845b4165d87a333edb53d2ca AS base
 RUN corepack enable pnpm
 
 # Dependencies stage
@@ -64,8 +65,19 @@ RUN pnpm --filter @workspace/migrate-runtime deploy --prod --legacy /deploy/migr
 RUN cp /app/apps/worker/dist-runtime/index.mjs /deploy/worker/index.mjs
 RUN cp -r /app/packages/lib/src/db/migrations /deploy/migrate/migrations
 
+# Runtime source. Remove package-management and interactive shell entrypoints
+# after the last RUN instruction while retaining Alpine's installed-package
+# database so SBOM scanners can still identify every supplied library.
+FROM node:24.20.0-alpine3.23@sha256:0388af2af070cd4736a1567cfed02469ba117848845b4165d87a333edb53d2ca AS runtime
+RUN rm -rf /usr/local/lib/node_modules \
+	&& rm -f /usr/local/bin/corepack /usr/local/bin/docker-entrypoint.sh \
+		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn \
+		/usr/local/bin/yarnpkg /sbin/apk /bin/ash /bin/busybox /bin/sh
+
+ENTRYPOINT ["/usr/local/bin/node"]
+
 # Runner stage for web app (Nitro)
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS web
+FROM runtime AS web
 WORKDIR /app
 
 ENV NODE_ENV=production
@@ -82,7 +94,7 @@ ENV HOST="0.0.0.0"
 CMD [".output/server/index.mjs"]
 
 # Migration stage — applies checked-in migrations then exits
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS migrate
+FROM runtime AS migrate
 WORKDIR /app
 
 COPY --from=builder --chown=65532:65532 /deploy/migrate ./
@@ -92,7 +104,7 @@ USER 65532:65532
 CMD ["--experimental-strip-types", "scripts/migrate.mts"]
 
 # Worker stage
-FROM gcr.io/distroless/nodejs24-debian13:nonroot@sha256:23a384b4596ec311f78ac9c46af2b8cc0ed403d1f9c3c249111266d7f56319db AS worker
+FROM runtime AS worker
 WORKDIR /app
 
 ENV NODE_ENV=production
