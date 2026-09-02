@@ -1,10 +1,11 @@
 # Elmo 
 # Supports: web app (Nitro server) and worker
 
-# Base stage with Node.js
-FROM node:24-alpine AS base
-RUN corepack enable pnpm
-RUN apk add --no-cache curl
+# Base stage with Node.js. The Alpine 3.23 repository supplies OpenSSL 3.5.8-r0;
+# the exact image index keeps the build reproducible across supported platforms.
+FROM node:24.20.0-alpine3.23@sha256:0388af2af070cd4736a1567cfed02469ba117848845b4165d87a333edb53d2ca AS base
+RUN apk add --no-cache --upgrade libcrypto3=3.5.8-r0 libssl3=3.5.8-r0 \
+	&& corepack enable pnpm
 
 # Dependencies stage
 FROM base AS deps
@@ -18,6 +19,7 @@ COPY packages/ui/package.json ./packages/ui/
 COPY packages/config/package.json ./packages/config/
 COPY packages/lib/package.json ./packages/lib/
 COPY packages/local/package.json ./packages/local/
+COPY packages/migrate-runtime/package.json ./packages/migrate-runtime/
 COPY packages/whitelabel/package.json ./packages/whitelabel/
 COPY packages/cloud/package.json ./packages/cloud/
 COPY packages/deployment/package.json ./packages/deployment/
@@ -39,6 +41,7 @@ COPY --from=deps /app/packages/ui/node_modules ./packages/ui/node_modules
 COPY --from=deps /app/packages/config/node_modules ./packages/config/node_modules
 COPY --from=deps /app/packages/lib/node_modules ./packages/lib/node_modules
 COPY --from=deps /app/packages/local/node_modules ./packages/local/node_modules
+COPY --from=deps /app/packages/migrate-runtime/node_modules ./packages/migrate-runtime/node_modules
 COPY --from=deps /app/packages/whitelabel/node_modules ./packages/whitelabel/node_modules
 COPY --from=deps /app/packages/cloud/node_modules ./packages/cloud/node_modules
 COPY --from=deps /app/packages/deployment/node_modules ./packages/deployment/node_modules
@@ -54,61 +57,61 @@ ENV VITE_DEPLOYMENT_MODE=${VITE_DEPLOYMENT_MODE}
 
 # Build the web application (increase heap for large bundles)
 RUN pnpm --filter @workspace/web build
+RUN pnpm --filter @workspace/worker build:runtime
 
 # Create pruned standalone deployments (only each package's own deps)
-# --legacy: allows deploy without inject-workspace-packages (which breaks Alpine Docker builds)
-RUN pnpm --filter @workspace/worker deploy --legacy /deploy/worker
-RUN pnpm --filter @workspace/lib deploy --legacy /deploy/lib
+# --legacy: deploy without changing the workspace's existing package-link layout.
+RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
+RUN pnpm --filter @workspace/migrate-runtime deploy --prod --legacy /deploy/migrate
+RUN cp /app/apps/worker/dist-runtime/index.mjs /deploy/worker/index.mjs
+RUN cp -r /app/packages/lib/src/db/migrations /deploy/migrate/migrations
+
+# Runtime source. Remove package-management and interactive shell entrypoints
+# after the last RUN instruction while retaining Alpine's installed-package
+# database so SBOM scanners can still identify every supplied library.
+FROM base AS runtime
+RUN rm -rf /usr/local/lib/node_modules \
+	&& rm -f /usr/local/bin/corepack /usr/local/bin/docker-entrypoint.sh \
+		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn \
+		/usr/local/bin/yarnpkg /sbin/apk /bin/ash /bin/busybox /bin/sh
+
+ENTRYPOINT ["/usr/local/bin/node"]
 
 # Runner stage for web app (Nitro)
-FROM base AS web
+FROM runtime AS web
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 elmo
-
-# Copy entrypoint script
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
 # Copy Nitro output - this is the entire server bundle
-COPY --from=builder --chown=elmo:nodejs /app/apps/web/.output ./.output
+COPY --from=builder --chown=65532:65532 /app/apps/web/.output ./.output
 
-USER elmo
+USER 65532:65532
 
 EXPOSE 3000
 ENV PORT=3000
 ENV HOST="0.0.0.0"
 
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["node", ".output/server/index.mjs"]
+CMD [".output/server/index.mjs"]
 
-# Migration stage — runs drizzle-kit migrate then exits
-FROM base AS migrate
+# Migration stage — applies checked-in migrations then exits
+FROM runtime AS migrate
 WORKDIR /app
 
-COPY --from=builder /deploy/lib ./
+COPY --from=builder --chown=65532:65532 /deploy/migrate ./
 
-CMD ["npx", "drizzle-kit", "migrate"]
+USER 65532:65532
+
+CMD ["--experimental-strip-types", "scripts/migrate.mts"]
 
 # Worker stage
-FROM base AS worker
+FROM runtime AS worker
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 worker
+COPY --from=builder --chown=65532:65532 /deploy/worker ./
 
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+USER 65532:65532
 
-COPY --from=builder --chown=worker:nodejs /deploy/worker ./
-
-USER worker
-
-ENTRYPOINT ["/entrypoint.sh"]
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["index.mjs"]

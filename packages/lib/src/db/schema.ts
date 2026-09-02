@@ -26,6 +26,7 @@ export * from "./schema-auth";
 // ============================================================================
 
 export const reportStatusEnum = pgEnum("report_status", ["pending", "processing", "completed", "failed"]);
+export const cellBatchCellStatusEnum = pgEnum("cell_batch_cell_status", ["pending", "running", "complete", "failed"]);
 
 export const brands = pgTable(
 	"brands",
@@ -196,6 +197,71 @@ export const reports = pgTable(
 	}),
 ).enableRLS();
 
+// DyReP cell-export supplement. It is deliberately separate from reports:
+// existing report/dashboard behavior remains unchanged and aggregate history
+// can never be mistaken for a complete query×surface×repetition matrix.
+export const cellBatches = pgTable(
+	"cell_batches",
+	{
+		id: uuid("id").defaultRandom().primaryKey().notNull(),
+		targetRef: text("target_ref").notNull(),
+		brandName: text("brand_name").notNull(),
+		brandWebsite: text("brand_website").notNull(),
+		idempotencyKey: text("idempotency_key").notNull().unique(),
+		requestHash: text("request_hash").notNull(),
+		requestBody: json("request_body").notNull(),
+		status: reportStatusEnum().notNull().default("pending"),
+		createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+		completedAt: timestamp("completed_at", { withTimezone: true }),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => ({
+		targetCreatedIdx: index("cell_batches_target_created_idx").on(table.targetRef, table.createdAt),
+	}),
+).enableRLS();
+
+export const cellBatchCells = pgTable(
+	"cell_batch_cells",
+	{
+		id: uuid("id").defaultRandom().primaryKey().notNull(),
+		batchId: uuid("batch_id")
+			.references(() => cellBatches.id, { onDelete: "cascade" })
+			.notNull(),
+		queryRef: text("query_ref").notNull(),
+		queryText: text("query_text").notNull(),
+		queryOrdinal: integer("query_ordinal").notNull(),
+		surface: text("surface").notNull(),
+		surfaceOrdinal: integer("surface_ordinal").notNull(),
+		repetition: integer("repetition").notNull(),
+		provider: text("provider").notNull(),
+		model: text("model").notNull(),
+		modelVersion: text("model_version"),
+		probeModality: text("probe_modality").notNull().default("consumer"),
+		status: cellBatchCellStatusEnum().notNull().default("pending"),
+		text: text("text"),
+		brandMentioned: boolean("brand_mentioned"),
+		citationsSupported: boolean("citations_supported").notNull().default(true),
+		citations: json("citations").notNull().default([]),
+		observedAt: timestamp("observed_at", { withTimezone: true }),
+		errorCode: text("error_code"),
+		updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+	},
+	(table) => ({
+		coordinateUnique: uniqueIndex("cell_batch_cells_coordinate_unique").on(
+			table.batchId,
+			table.queryRef,
+			table.surface,
+			table.repetition,
+		),
+		batchOrderIdx: index("cell_batch_cells_batch_order_idx").on(
+			table.batchId,
+			table.queryOrdinal,
+			table.surfaceOrdinal,
+			table.repetition,
+		),
+	}),
+).enableRLS();
+
 // One row per generated Opportunities report, per brand — append-only history
 // (every generation is kept, not overwritten). The page reads the latest row and
 // regenerates only when it's stale; see apps/web/src/server/opportunities.ts.
@@ -242,6 +308,10 @@ export type NewCitationRecord = typeof citations.$inferInsert;
 
 export type Report = typeof reports.$inferSelect;
 export type NewReport = typeof reports.$inferInsert;
+export type CellBatch = typeof cellBatches.$inferSelect;
+export type NewCellBatch = typeof cellBatches.$inferInsert;
+export type CellBatchCell = typeof cellBatchCells.$inferSelect;
+export type NewCellBatchCell = typeof cellBatchCells.$inferInsert;
 
 export const SYSTEM_TAGS = {
 	BRANDED: "branded",

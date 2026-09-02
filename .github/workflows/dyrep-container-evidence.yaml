@@ -1,0 +1,256 @@
+name: DyReP container evidence
+
+on:
+  pull_request:
+    branches:
+      - dyrep/v0.3.0-base
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-evidence:
+    name: Build, SBOM, and CVE evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: elmo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d elmo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      SYFT_VERSION: 1.51.1
+      GRYPE_VERSION: 0.118.0
+      CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+
+      - name: Run full Linux gate on candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm turbo check-types
+          pnpm turbo test
+          pnpm test:scripts
+          pnpm build
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "The full candidate build changed the working tree." >&2
+            git status --porcelain=v1 --untracked-files=all
+            git diff --
+            exit 1
+          fi
+
+      - name: Install pinned scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence tools
+
+          syft_archive="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${syft_archive}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${syft_archive}"
+          curl --fail --location --silent --show-error \
+            --output syft_checksums.txt \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt"
+          grep " ${syft_archive}$" syft_checksums.txt | sha256sum --check --strict
+          tar --extract --gzip --file "${syft_archive}" --directory tools syft
+
+          grype_archive="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${grype_archive}" \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/${grype_archive}"
+          curl --fail --location --silent --show-error \
+            --output grype_checksums.txt \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt"
+          grep " ${grype_archive}$" grype_checksums.txt | sha256sum --check --strict
+          tar --extract --gzip --file "${grype_archive}" --directory tools grype
+
+          tools/syft version | tee evidence/syft-version.txt
+          tools/grype version | tee evidence/grype-version.txt
+
+      - name: Build three local candidate images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
+            docker build \
+              --file docker/Dockerfile \
+              --target "${target}" \
+              --tag "${image}" \
+              .
+            docker image inspect "${image}" > "evidence/${target}-image-inspect.json"
+            docker image inspect --format '{{.Id}}' "${image}" \
+              | tee "evidence/${target}-image-id.txt"
+          done
+
+      - name: Verify minimal runtime entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
+            container="$(docker create "${image}")"
+            docker export "${container}" | tar --list > "evidence/${target}-runtime-files.txt"
+            docker rm "${container}" >/dev/null
+
+            for forbidden in \
+              bin/ash bin/busybox bin/sh sbin/apk \
+              usr/local/bin/corepack usr/local/bin/npm usr/local/bin/npx \
+              usr/local/bin/yarn usr/local/bin/yarnpkg; do
+              if grep --fixed-strings --line-regexp --quiet \
+                "${forbidden}" "evidence/${target}-runtime-files.txt"; then
+                echo "Forbidden runtime tool found in ${target}: ${forbidden}" >&2
+                exit 1
+              fi
+            done
+          done
+
+          worker_image="dyrep-elmo-worker:${CANDIDATE_SHA}"
+          set +e
+          docker run --rm "${worker_image}" > evidence/worker-runtime-smoke.txt 2>&1
+          worker_status=$?
+          set -e
+          if [ "${worker_status}" -ne 1 ] || ! grep -Fq "DATABASE_URL is required for pg-boss" evidence/worker-runtime-smoke.txt; then
+            cat evidence/worker-runtime-smoke.txt
+            echo "Worker runtime did not fail closed without DATABASE_URL (status ${worker_status})." >&2
+            exit 1
+          fi
+
+          migrate_image="dyrep-elmo-migrate:${CANDIDATE_SHA}"
+          set +e
+          docker run --rm "${migrate_image}" > evidence/migrate-runtime-smoke.txt 2>&1
+          migrate_status=$?
+          set -e
+          if [ "${migrate_status}" -ne 1 ] || ! grep -Fq "DATABASE_URL is required" evidence/migrate-runtime-smoke.txt; then
+            cat evidence/migrate-runtime-smoke.txt
+            echo "Migrate runtime did not fail closed without DATABASE_URL (status ${migrate_status})." >&2
+            exit 1
+          fi
+
+      - name: Prove migrations on disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          migrate_image="dyrep-elmo-migrate:${CANDIDATE_SHA}"
+          database_url="postgres://postgres:postgres@127.0.0.1:5432/elmo"
+          postgres_image="postgres:18-alpine"
+          expected_migrations="$(node -e 'const journal=require("./packages/lib/src/db/migrations/meta/_journal.json"); process.stdout.write(String(journal.entries.length))')"
+
+          docker run --rm --network host \
+            --env DATABASE_URL="${database_url}" \
+            "${migrate_image}" | tee evidence/migrate-first-run.txt
+
+          docker run --rm --network host "${postgres_image}" \
+            pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
+            > evidence/migrate-schema-first.raw.sql
+          sed '/^\\restrict /d; /^\\unrestrict /d' \
+            evidence/migrate-schema-first.raw.sql > evidence/migrate-schema-first.sql
+          docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
+            > evidence/migrate-journal-first.txt
+
+          actual_migrations="$(docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT count(*) FROM drizzle.__drizzle_migrations")"
+          if [ "${actual_migrations}" != "${expected_migrations}" ]; then
+            echo "Expected ${expected_migrations} migrations, found ${actual_migrations}." >&2
+            exit 1
+          fi
+
+          expected_tables="$(docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT to_regclass('public.cell_batches') IS NOT NULL AND to_regclass('public.cell_batch_cells') IS NOT NULL")"
+          if [ "${expected_tables}" != "t" ]; then
+            echo "DyReP cell-batch tables were not created by the migration image." >&2
+            exit 1
+          fi
+
+          docker run --rm --network host \
+            --env DATABASE_URL="${database_url}" \
+            "${migrate_image}" | tee evidence/migrate-second-run.txt
+
+          docker run --rm --network host "${postgres_image}" \
+            pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
+            > evidence/migrate-schema-second.raw.sql
+          sed '/^\\restrict /d; /^\\unrestrict /d' \
+            evidence/migrate-schema-second.raw.sql > evidence/migrate-schema-second.sql
+          docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
+            > evidence/migrate-journal-second.txt
+
+          cmp evidence/migrate-schema-first.sql evidence/migrate-schema-second.sql
+          cmp evidence/migrate-journal-first.txt evidence/migrate-journal-second.txt
+
+      - name: Generate SBOMs and vulnerability reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan_exit=0
+          tools/grype db update
+          tools/grype db status -o json > evidence/grype-db-status.json
+
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${CANDIDATE_SHA}"
+            sbom="evidence/${target}.spdx.json"
+            report="evidence/${target}-grype.json"
+
+            tools/syft "${image}" --output "spdx-json=${sbom}"
+            tools/grype "sbom:${sbom}" --output json > "${report}"
+            if ! tools/grype "sbom:${sbom}" --fail-on high \
+              | tee "evidence/${target}-grype.txt"; then
+              scan_exit=1
+            fi
+          done
+
+          sha256sum evidence/* > evidence/SHA256SUMS
+          {
+            echo '## DyReP container evidence'
+            echo
+            echo "Candidate: \`${CANDIDATE_SHA}\`"
+            echo
+            echo 'No image was pushed to a registry.'
+            echo
+            echo 'The run fails when Grype finds a HIGH or CRITICAL vulnerability.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          exit "${scan_exit}"
+
+      - name: Preserve evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dyrep-elmo-container-evidence-${{ env.CANDIDATE_SHA }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
