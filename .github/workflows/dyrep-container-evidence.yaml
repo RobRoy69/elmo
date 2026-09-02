@@ -18,6 +18,20 @@ jobs:
     name: Build, SBOM, and CVE evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: elmo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d elmo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       SYFT_VERSION: 1.51.1
       GRYPE_VERSION: 0.118.0
@@ -31,6 +45,24 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 24
+
+      - name: Run full Linux gate on candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm turbo check-types
+          pnpm turbo test
+          pnpm test:scripts
+          pnpm build
+          if [ -n "$(git status --porcelain=v1 --untracked-files=all)" ]; then
+            echo "The full candidate build changed the working tree." >&2
+            git status --porcelain=v1 --untracked-files=all
+            git diff --
+            exit 1
+          fi
 
       - name: Install pinned scanners
         shell: bash
@@ -60,13 +92,6 @@ jobs:
 
           tools/syft version | tee evidence/syft-version.txt
           tools/grype version | tee evidence/grype-version.txt
-
-      - name: Run Linux release script tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          corepack enable
-          corepack pnpm test:scripts | tee evidence/linux-script-tests.txt
 
       - name: Build three local candidate images
         shell: bash
@@ -128,6 +153,59 @@ jobs:
             echo "Migrate runtime did not fail closed without DATABASE_URL (status ${migrate_status})." >&2
             exit 1
           fi
+
+      - name: Prove migrations on disposable PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          migrate_image="dyrep-elmo-migrate:${CANDIDATE_SHA}"
+          database_url="postgres://postgres:postgres@127.0.0.1:5432/elmo"
+          postgres_image="postgres:18-alpine"
+          expected_migrations="$(node -e 'const journal=require("./packages/lib/src/db/migrations/meta/_journal.json"); process.stdout.write(String(journal.entries.length))')"
+
+          docker run --rm --network host \
+            --env DATABASE_URL="${database_url}" \
+            "${migrate_image}" | tee evidence/migrate-first-run.txt
+
+          docker run --rm --network host "${postgres_image}" \
+            pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
+            > evidence/migrate-schema-first.sql
+          docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
+            > evidence/migrate-journal-first.txt
+
+          actual_migrations="$(docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT count(*) FROM drizzle.__drizzle_migrations")"
+          if [ "${actual_migrations}" != "${expected_migrations}" ]; then
+            echo "Expected ${expected_migrations} migrations, found ${actual_migrations}." >&2
+            exit 1
+          fi
+
+          expected_tables="$(docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT to_regclass('public.cell_batches') IS NOT NULL AND to_regclass('public.cell_batch_cells') IS NOT NULL")"
+          if [ "${expected_tables}" != "t" ]; then
+            echo "DyReP cell-batch tables were not created by the migration image." >&2
+            exit 1
+          fi
+
+          docker run --rm --network host \
+            --env DATABASE_URL="${database_url}" \
+            "${migrate_image}" | tee evidence/migrate-second-run.txt
+
+          docker run --rm --network host "${postgres_image}" \
+            pg_dump "${database_url}" --schema-only --no-owner --no-privileges \
+            > evidence/migrate-schema-second.sql
+          docker run --rm --network host "${postgres_image}" \
+            psql "${database_url}" --tuples-only --no-align \
+            --command "SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at, hash" \
+            > evidence/migrate-journal-second.txt
+
+          cmp evidence/migrate-schema-first.sql evidence/migrate-schema-second.sql
+          cmp evidence/migrate-journal-first.txt evidence/migrate-journal-second.txt
 
       - name: Generate SBOMs and vulnerability reports
         shell: bash
