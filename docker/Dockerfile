@@ -53,11 +53,13 @@ ENV VITE_DEPLOYMENT_MODE=${VITE_DEPLOYMENT_MODE}
 
 # Build the web application (increase heap for large bundles)
 RUN pnpm --filter @workspace/web build
+RUN pnpm --filter @workspace/worker build:runtime
 
 # Create pruned standalone deployments (only each package's own deps)
 # --legacy: deploy without changing the workspace's existing package-link layout.
 RUN pnpm --filter @workspace/worker deploy --prod --legacy /deploy/worker
 RUN pnpm --filter @workspace/lib deploy --prod --legacy /deploy/lib
+RUN cp /app/apps/worker/dist-runtime/index.mjs /deploy/worker/index.mjs
 
 # Runtime stage: keep build tooling and package managers outside final images.
 FROM node:24.20.0-bookworm-slim@sha256:6642ef280aebc09c4541bee0b15c9f89f0f3f3c247ddee79ae1d37eddfdcbbaa AS runtime
@@ -115,4 +117,4 @@ COPY --from=builder --chown=worker:nodejs /deploy/worker ./
 USER worker
 
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["node", "--experimental-strip-types", "src/index.ts"]
+CMD ["node", "index.mjs"]

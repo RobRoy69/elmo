@@ -7,6 +7,7 @@
 		"dev": "tsx --env-file=../web/.env src/index.ts",
 		"start": "tsx src/index.ts",
 		"build": "tsc -p tsconfig.json",
+		"build:runtime": "node scripts/build-runtime.mjs",
 		"check-types": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -24,6 +25,7 @@
 	"devDependencies": {
 		"@types/node": "^26.2.0",
 		"@types/pg": "^8.21.0",
+		"esbuild": "0.28.2",
 		"tsx": "^4.23.12",
 		"typescript": "^7.0.2"
 	}

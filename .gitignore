@@ -83,6 +83,7 @@ e2e/artifacts
 .agents/
 .cursor/
 apps/www/dist/
+apps/worker/dist-runtime/
 apps/web/storybook-static/
 
 .claude/settings.local.json
