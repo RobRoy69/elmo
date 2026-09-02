@@ -1,0 +1,115 @@
+name: DyReP container evidence
+
+on:
+  pull_request:
+    branches:
+      - dyrep/v0.3.0-base
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-evidence:
+    name: Build, SBOM, and CVE evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      SYFT_VERSION: 1.51.1
+      GRYPE_VERSION: 0.118.0
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Install pinned scanners
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence tools
+
+          syft_archive="syft_${SYFT_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${syft_archive}" \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/${syft_archive}"
+          curl --fail --location --silent --show-error \
+            --output syft_checksums.txt \
+            "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_checksums.txt"
+          grep " ${syft_archive}$" syft_checksums.txt | sha256sum --check --strict
+          tar --extract --gzip --file "${syft_archive}" --directory tools syft
+
+          grype_archive="grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${grype_archive}" \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/${grype_archive}"
+          curl --fail --location --silent --show-error \
+            --output grype_checksums.txt \
+            "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_checksums.txt"
+          grep " ${grype_archive}$" grype_checksums.txt | sha256sum --check --strict
+          tar --extract --gzip --file "${grype_archive}" --directory tools grype
+
+          tools/syft version | tee evidence/syft-version.txt
+          tools/grype version | tee evidence/grype-version.txt
+
+      - name: Build three local candidate images
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${GITHUB_SHA}"
+            docker build \
+              --file docker/Dockerfile \
+              --target "${target}" \
+              --tag "${image}" \
+              .
+            docker image inspect "${image}" > "evidence/${target}-image-inspect.json"
+            docker image inspect --format '{{.Id}}' "${image}" \
+              | tee "evidence/${target}-image-id.txt"
+          done
+
+      - name: Generate SBOMs and vulnerability reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          scan_exit=0
+          tools/grype db status -o json > evidence/grype-db-status.json
+
+          for target in web worker migrate; do
+            image="dyrep-elmo-${target}:${GITHUB_SHA}"
+            sbom="evidence/${target}.spdx.json"
+            report="evidence/${target}-grype.json"
+
+            tools/syft "${image}" --output "spdx-json=${sbom}"
+            tools/grype "sbom:${sbom}" --output json > "${report}"
+            if ! tools/grype "sbom:${sbom}" --fail-on high \
+              | tee "evidence/${target}-grype.txt"; then
+              scan_exit=1
+            fi
+          done
+
+          sha256sum evidence/* > evidence/SHA256SUMS
+          {
+            echo '## DyReP container evidence'
+            echo
+            echo "Candidate: \`${GITHUB_SHA}\`"
+            echo
+            echo 'No image was pushed to a registry.'
+            echo
+            echo 'The run fails when Grype finds a HIGH or CRITICAL vulnerability.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          exit "${scan_exit}"
+
+      - name: Preserve evidence bundle
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dyrep-elmo-container-evidence-${{ github.sha }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 9
