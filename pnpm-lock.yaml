@@ -289,6 +289,21 @@ importers:
 
   apps/worker:
     dependencies:
+      '@ai-sdk/anthropic':
+        specifier: ^4.0.39
+        version: 4.0.39(zod@4.4.3)
+      '@ai-sdk/openai':
+        specifier: ^4.0.42
+        version: 4.0.42(zod@4.4.3)
+      '@anthropic-ai/sdk':
+        specifier: ^0.117.1
+        version: 0.117.1(zod@4.4.3)
+      '@brightdata/sdk':
+        specifier: ^1.2.0
+        version: 1.2.0
+      '@mozilla/readability':
+        specifier: ^0.6.0
+        version: 0.6.0
       '@sentry/node':
         specifier: ^10.70.0
         version: 10.70.0(@opentelemetry/core@2.10.0(@opentelemetry/api@1.9.1))(supports-color@7.2.0)
@@ -304,12 +319,27 @@ importers:
       '@workspace/whitelabel':
         specifier: workspace:*
         version: link:../../packages/whitelabel
+      ai:
+        specifier: ^7.0.66
+        version: 7.0.66(zod@4.4.3)
       auth0:
         specifier: ^6.2.0
         version: 6.2.0
+      dataforseo-client:
+        specifier: ^2.1.3
+        version: 2.1.3
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@prisma/client@5.22.0)(@types/pg@8.21.0)(@upstash/redis@1.38.2)(better-sqlite3@12.11.1)(kysely@0.28.17)(pg@8.23.0)
+      jose:
+        specifier: 6.2.9
+        version: 6.2.9
+      linkedom:
+        specifier: ^0.18.13
+        version: 0.18.13
+      olostep:
+        specifier: ^1.2.2
+        version: 1.2.2
       pg:
         specifier: ^8.23.0
         version: 8.23.0
@@ -319,6 +349,9 @@ importers:
       posthog-node:
         specifier: ^5.49.1
         version: 5.49.1
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: ^26.2.0
