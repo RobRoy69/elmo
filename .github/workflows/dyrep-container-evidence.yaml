@@ -36,6 +36,8 @@ jobs:
       SYFT_VERSION: 1.51.1
       GRYPE_VERSION: 0.118.0
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo
+      DYREP_GEO_TARGET_REF: dyrep-org
 
     steps:
       - name: Checkout candidate
@@ -52,6 +54,7 @@ jobs:
           set -euo pipefail
           corepack enable
           pnpm install --frozen-lockfile
+          pnpm -C packages/lib exec drizzle-kit migrate
           pnpm lint
           pnpm turbo check-types
           pnpm turbo test
