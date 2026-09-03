@@ -2,6 +2,9 @@
   "$schema": "https://turborepo.dev/schema.json",
   "globalEnv": [
     "DATABASE_URL",
+    "ELMO_WORKER_TEST_DATABASE_URL",
+    "ELMO_WORKER_TEST_DISPOSABLE_DATABASE",
+    "ELMO_WORKER_TEST_REQUIRED",
     "APP_URL",
     "BETTER_AUTH_SECRET",
     "AUTH0_DOMAIN",

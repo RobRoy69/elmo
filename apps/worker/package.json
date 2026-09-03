@@ -8,7 +8,8 @@
 		"start": "tsx src/index.ts",
 		"build": "tsc -p tsconfig.json",
 		"build:runtime": "node scripts/build-runtime.mjs",
-		"check-types": "tsc --noEmit"
+		"check-types": "tsc --noEmit",
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^4.0.39",
@@ -38,6 +39,7 @@
 		"@workspace/whitelabel": "workspace:*",
 		"esbuild": "^0.28.1",
 		"tsx": "^4.23.12",
-		"typescript": "^7.0.2"
+		"typescript": "^7.0.2",
+		"vitest": "^4.1.10"
 	}
 }

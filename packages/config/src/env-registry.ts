@@ -49,6 +49,24 @@ export const ENV_REGISTRY: EnvVarSpec[] = [
 		description: "PostgreSQL connection string.",
 	},
 	{
+		name: "ELMO_WORKER_TEST_DATABASE_URL",
+		scope: "server",
+		requiredBy: "optional",
+		description: "Disposable local PostgreSQL URL for worker integration tests.",
+	},
+	{
+		name: "ELMO_WORKER_TEST_DISPOSABLE_DATABASE",
+		scope: "server",
+		requiredBy: "optional",
+		description: "Explicit opt-in for destructive worker integration-test setup.",
+	},
+	{
+		name: "ELMO_WORKER_TEST_REQUIRED",
+		scope: "server",
+		requiredBy: "optional",
+		description: "Makes the worker database integration suite fail if its database URL is absent.",
+	},
+	{
 		name: "APP_URL",
 		scope: "server",
 		requiredBy: ["cloud"],
