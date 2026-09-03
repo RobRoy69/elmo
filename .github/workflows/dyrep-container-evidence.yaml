@@ -24,7 +24,7 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: elmo
+          POSTGRES_DB: elmo_test
         ports:
           - 5432:5432
         options: >-
@@ -36,7 +36,9 @@ jobs:
       SYFT_VERSION: 1.51.1
       GRYPE_VERSION: 0.118.0
       CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
+      ELMO_WORKER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
+      ELMO_WORKER_TEST_DISPOSABLE_DATABASE: "1"
       DYREP_GEO_TARGET_REF: dyrep-org
 
     steps:
@@ -163,7 +165,7 @@ jobs:
           set -euo pipefail
 
           migrate_image="dyrep-elmo-migrate:${CANDIDATE_SHA}"
-          database_url="postgres://postgres:postgres@127.0.0.1:5432/elmo"
+          database_url="postgres://postgres:postgres@127.0.0.1:5432/elmo_test"
           postgres_image="postgres:18-alpine"
           expected_migrations="$(node -e 'const journal=require("./packages/lib/src/db/migrations/meta/_journal.json"); process.stdout.write(String(journal.entries.length))')"
 

@@ -7,7 +7,7 @@ import {
 import { db } from "@workspace/lib/db/db";
 import { cellBatchCells, cellBatches } from "@workspace/lib/db/schema";
 import { getProvider, parseScrapeTargets } from "@workspace/lib/providers";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Job } from "pg-boss";
 
 export interface ProcessCellBatchData {
@@ -24,8 +24,14 @@ function mentioned(text: string, brandName: string, brandWebsite: string): boole
 	return normalized.includes(brandName.toLowerCase()) || normalized.includes(domain);
 }
 
-async function prepareBatch(batchId: string, startedAt: Date): Promise<void> {
-	await db.transaction(async (tx) => {
+async function prepareBatch(batchId: string, startedAt: Date): Promise<boolean> {
+	return db.transaction(async (tx) => {
+		const claimed = await tx
+			.update(cellBatches)
+			.set({ status: "processing", updatedAt: startedAt })
+			.where(and(eq(cellBatches.id, batchId), inArray(cellBatches.status, ["pending", "processing"])))
+			.returning({ id: cellBatches.id });
+		if (claimed.length !== 1) return false;
 		// A retry never repeats an ambiguous paid call. A cell left running by a
 		// dead worker becomes an explicit failed outcome and remains in 12/12.
 		await tx
@@ -39,13 +45,19 @@ async function prepareBatch(batchId: string, startedAt: Date): Promise<void> {
 				updatedAt: startedAt,
 			})
 			.where(and(eq(cellBatchCells.batchId, batchId), eq(cellBatchCells.status, "running")));
-		await tx.update(cellBatches).set({ status: "processing", updatedAt: startedAt }).where(eq(cellBatches.id, batchId));
+		return true;
 	});
 }
 
 async function failBatch(batchId: string, errorCode: string): Promise<void> {
 	const now = new Date();
 	await db.transaction(async (tx) => {
+		const failed = await tx
+			.update(cellBatches)
+			.set({ status: "failed", completedAt: now, updatedAt: now })
+			.where(and(eq(cellBatches.id, batchId), inArray(cellBatches.status, ["pending", "processing"])))
+			.returning({ id: cellBatches.id });
+		if (failed.length !== 1) return;
 		await tx
 			.update(cellBatchCells)
 			.set({
@@ -68,10 +80,6 @@ async function failBatch(batchId: string, errorCode: string): Promise<void> {
 				updatedAt: now,
 			})
 			.where(and(eq(cellBatchCells.batchId, batchId), eq(cellBatchCells.status, "pending")));
-		await tx
-			.update(cellBatches)
-			.set({ status: "failed", completedAt: now, updatedAt: now })
-			.where(eq(cellBatches.id, batchId));
 	});
 }
 
@@ -195,10 +203,11 @@ async function finalizeBatch(batchId: string): Promise<void> {
 			completedAt: now,
 			updatedAt: now,
 		})
-		.where(eq(cellBatches.id, batchId));
+		.where(and(eq(cellBatches.id, batchId), eq(cellBatches.status, "processing")));
 }
 
 async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<void> {
+	if (!(await prepareBatch(batch.id, new Date()))) return;
 	const bindingFailure = validateCellBatchTargetBinding(
 		process.env.DYREP_GEO_TARGET_REF,
 		batch.targetRef,
@@ -208,7 +217,6 @@ async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<
 		await failBatch(batch.id, bindingFailure);
 		return;
 	}
-	await prepareBatch(batch.id, new Date());
 	const cells = await db
 		.select()
 		.from(cellBatchCells)
@@ -224,6 +232,12 @@ async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<
 		return;
 	}
 	for (const cell of cells) {
+		const [current] = await db
+			.select({ status: cellBatches.status })
+			.from(cellBatches)
+			.where(eq(cellBatches.id, batch.id))
+			.limit(1);
+		if (current?.status !== "processing") return;
 		if ((await processCell(cell, batch, configs)) === "target_binding_failed") {
 			await failBatch(batch.id, "target_binding_changed");
 			return;

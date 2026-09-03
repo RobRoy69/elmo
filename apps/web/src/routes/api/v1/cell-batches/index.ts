@@ -90,10 +90,12 @@ export const Route = createFileRoute("/api/v1/cell-batches/")({
 					if ((result.created || result.batch.status === "pending") && !(await sendCellBatchJob(result.batch.id))) {
 						const now = new Date();
 						await db.transaction(async (tx) => {
-							await tx
+							const failed = await tx
 								.update(cellBatches)
 								.set({ status: "failed", completedAt: now, updatedAt: now })
-								.where(eq(cellBatches.id, result.batch.id));
+								.where(and(eq(cellBatches.id, result.batch.id), eq(cellBatches.status, "pending")))
+								.returning({ id: cellBatches.id });
+							if (failed.length !== 1) return;
 							await tx
 								.update(cellBatchCells)
 								.set({

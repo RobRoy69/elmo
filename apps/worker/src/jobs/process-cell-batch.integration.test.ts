@@ -16,9 +16,24 @@ vi.mock("@workspace/lib/providers", () => ({
 	],
 }));
 
-import { type ProcessCellBatchData, processCellBatchJob } from "./process-cell-batch";
+import type { ProcessCellBatchData } from "./process-cell-batch.js";
 
-const databaseUrl = process.env.DATABASE_URL;
+const databaseUrl = process.env.ELMO_WORKER_TEST_DATABASE_URL;
+if (databaseUrl) {
+	const parsed = new URL(databaseUrl);
+	if (
+		process.env.ELMO_WORKER_TEST_DISPOSABLE_DATABASE !== "1" ||
+		!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname) ||
+		parsed.username !== "postgres" ||
+		parsed.pathname !== "/elmo_test"
+	) {
+		throw new Error(
+			"ELMO_WORKER_TEST_DATABASE_URL must identify the explicitly opted-in disposable local test database",
+		);
+	}
+	process.env.DATABASE_URL = databaseUrl;
+}
+let processCellBatchJob: typeof import("./process-cell-batch.js").processCellBatchJob;
 const databaseDescribe = databaseUrl ? describe : describe.skip;
 const targetRef = "dyrep-org";
 const brandWebsite = "https://dyrep.org";
@@ -43,7 +58,10 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 	let pool: Pool;
 
 	beforeAll(async () => {
+		({ processCellBatchJob } = await import("./process-cell-batch.js"));
 		pool = new Pool({ connectionString: databaseUrl });
+		const identity = await pool.query("select current_database() database, current_user username");
+		expect(identity.rows[0]).toEqual({ database: "elmo_test", username: "postgres" });
 		const tables = await pool.query(
 			"select to_regclass('public.cell_batches') batches, to_regclass('public.cell_batch_cells') cells",
 		);
@@ -125,6 +143,55 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 		await processCellBatchJob(job(batchId));
 		expect((await state(batchId)).batch).toBe(terminalStatus);
 		expect(provider.run).not.toHaveBeenCalled();
+	});
+
+	it("does not reclaim a batch that becomes terminal after the initial read", async () => {
+		const batchId = await seedBatch();
+		const blocker = await pool.connect();
+		try {
+			await blocker.query("begin");
+			await blocker.query("select id from cell_batches where id = $1 for update", [batchId]);
+			const processing = processCellBatchJob(job(batchId));
+			await new Promise((resolve) => setTimeout(resolve, 150));
+			await blocker.query(
+				"update cell_batches set status = 'failed', completed_at = now(), updated_at = now() where id = $1",
+				[batchId],
+			);
+			await blocker.query("commit");
+			await processing;
+		} finally {
+			await blocker.query("rollback").catch(() => undefined);
+			blocker.release();
+		}
+		expect((await state(batchId)).batch).toBe("failed");
+		expect(provider.run).not.toHaveBeenCalled();
+	});
+
+	it("stops before the next provider call when a concurrent writer terminalizes the batch", async () => {
+		const batchId = await seedBatch();
+		let releaseProvider!: () => void;
+		let markProviderStarted!: () => void;
+		const providerStarted = new Promise<void>((resolve) => {
+			markProviderStarted = resolve;
+		});
+		const providerRelease = new Promise<void>((resolve) => {
+			releaseProvider = resolve;
+		});
+		provider.run.mockImplementationOnce(async () => {
+			markProviderStarted();
+			await providerRelease;
+			return successfulResult;
+		});
+		const processing = processCellBatchJob(job(batchId));
+		await providerStarted;
+		await pool.query(
+			"update cell_batches set status = 'failed', completed_at = now(), updated_at = now() where id = $1",
+			[batchId],
+		);
+		releaseProvider();
+		await processing;
+		expect((await state(batchId)).batch).toBe("failed");
+		expect(provider.run).toHaveBeenCalledTimes(1);
 	});
 
 	it("turns a running cell left by a crash into an explicit failed outcome", async () => {
