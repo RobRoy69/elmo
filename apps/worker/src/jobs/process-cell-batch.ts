@@ -1,5 +1,6 @@
 import {
 	executeCellBatchTargetBound,
+	recoveryAction,
 	resolveCellSurfaceConfigs,
 	validateCellBatchTargetBinding,
 } from "@workspace/lib/cell-batches";
@@ -79,7 +80,23 @@ async function processCell(
 	batch: CellBatch,
 	configs: SurfaceConfigs,
 ): Promise<"continue" | "target_binding_failed"> {
-	if (cell.status !== "pending") return "continue";
+	const action = recoveryAction(cell.status);
+	if (action === "keep_terminal") return "continue";
+	if (action === "fail_outcome_unknown") {
+		const observedAt = new Date();
+		await db
+			.update(cellBatchCells)
+			.set({
+				status: "failed",
+				modelVersion: "outcome_unknown",
+				brandMentioned: false,
+				observedAt,
+				errorCode: "outcome_unknown_after_worker_restart",
+				updatedAt: observedAt,
+			})
+			.where(and(eq(cellBatchCells.id, cell.id), eq(cellBatchCells.status, "running")));
+		return "continue";
+	}
 	const config = configs.get(cell.surface);
 	if (!config || config.model !== cell.model || config.provider !== cell.provider) {
 		const observedAt = new Date();
@@ -174,10 +191,7 @@ async function finalizeBatch(batchId: string): Promise<void> {
 	await db
 		.update(cellBatches)
 		.set({
-			status:
-				terminal.length === 12 && terminal.every(({ status }) => status === "complete" || status === "failed")
-					? "completed"
-					: "failed",
+			status: terminal.length === 12 && terminal.every(({ status }) => status === "complete") ? "completed" : "failed",
 			completedAt: now,
 			updatedAt: now,
 		})
@@ -222,7 +236,7 @@ export async function processCellBatchJob(jobs: Job<ProcessCellBatchData>[]): Pr
 	let configs: SurfaceConfigs | undefined;
 	for (const job of jobs) {
 		const [batch] = await db.select().from(cellBatches).where(eq(cellBatches.id, job.data.batchId)).limit(1);
-		if (!batch || batch.status === "completed") continue;
+		if (!batch || batch.status === "completed" || batch.status === "failed") continue;
 		const bindingFailure = validateCellBatchTargetBinding(
 			process.env.DYREP_GEO_TARGET_REF,
 			batch.targetRef,
