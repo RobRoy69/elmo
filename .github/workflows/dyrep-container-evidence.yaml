@@ -39,6 +39,7 @@ jobs:
       DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
       ELMO_WORKER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
       ELMO_WORKER_TEST_DISPOSABLE_DATABASE: "1"
+      ELMO_WORKER_TEST_REQUIRED: "1"
       DYREP_GEO_TARGET_REF: dyrep-org
 
     steps:

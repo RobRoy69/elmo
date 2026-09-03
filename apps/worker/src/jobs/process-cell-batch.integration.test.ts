@@ -19,6 +19,9 @@ vi.mock("@workspace/lib/providers", () => ({
 import type { ProcessCellBatchData } from "./process-cell-batch.js";
 
 const databaseUrl = process.env.ELMO_WORKER_TEST_DATABASE_URL;
+if (process.env.ELMO_WORKER_TEST_REQUIRED === "1" && !databaseUrl) {
+	throw new Error("ELMO_WORKER_TEST_DATABASE_URL is required for this test run");
+}
 if (databaseUrl) {
 	const parsed = new URL(databaseUrl);
 	if (
