@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { normalizeCellBatchRequest } from "@workspace/lib/cell-batches";
 import { Pool } from "pg";
 import type { Job } from "pg-boss";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createNetlifyBatch, readNetlifyBatch } from "../netlify-cell-api.js";
 
 const provider = vi.hoisted(() => ({
 	run: vi.fn(),
@@ -37,6 +39,7 @@ if (databaseUrl) {
 	process.env.DATABASE_URL = databaseUrl;
 }
 let processCellBatchJob: typeof import("./process-cell-batch.js").processCellBatchJob;
+let processNetlifyCellBatch: typeof import("./process-cell-batch.js").processNetlifyCellBatch;
 const databaseDescribe = databaseUrl ? describe : describe.skip;
 const targetRef = "dyrep-org";
 const brandWebsite = "https://dyrep.org";
@@ -62,6 +65,7 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 
 	beforeAll(async () => {
 		({ processCellBatchJob } = await import("./process-cell-batch.js"));
+		({ processNetlifyCellBatch } = await import("./process-cell-batch.js"));
 		pool = new Pool({ connectionString: databaseUrl });
 		const identity = await pool.query("select current_database() database, current_user username");
 		expect(identity.rows[0]).toEqual({ database: "elmo_test", username: "postgres" });
@@ -77,6 +81,7 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 
 	beforeEach(async () => {
 		process.env.DYREP_GEO_TARGET_REF = targetRef;
+		delete process.env.DYREP_GEO_EXECUTION_MODE;
 		provider.run.mockReset();
 		provider.run.mockResolvedValue(successfulResult);
 		await pool.query("truncate table cell_batch_cells, cell_batches restart identity cascade");
@@ -139,6 +144,82 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 			cells: cells.rows as Array<{ status: string; error_code: string | null }>,
 		};
 	}
+
+	it("Netlify API atomically creates twelve cells, replays and exports the processed batch", async () => {
+		process.env.DYREP_GEO_EXECUTION_MODE = "netlify";
+		const normalized = normalizeCellBatchRequest({
+			targetRef,
+			brandName: "DyReP",
+			brandWebsite,
+			queries: [1, 2].map((index) => ({ queryRef: `query-${index}`, text: `Question ${index}` })),
+			surfaces: ["chatgpt-search", "google-ai", "perplexity"],
+			repetitions: 2,
+		});
+		const binding = { batchId: randomUUID(), requestHash: normalized.requestHash };
+		const configs = ["chatgpt", "google-ai-mode", "perplexity"].map((model) => ({
+			model,
+			provider: "stub",
+			webSearch: false,
+		}));
+		const results = await Promise.all([
+			createNetlifyBatch(normalized.body, "test:api-key", binding, configs),
+			createNetlifyBatch(normalized.body, "test:api-key", binding, configs),
+		]);
+		expect(results.map((result) => result.idempotentReplay).sort()).toEqual([false, true]);
+		expect((await readNetlifyBatch(binding, 1, 7)).pagination.total).toBe(12);
+		await expect(createNetlifyBatch(normalized.body, "test:other-key", binding, configs)).rejects.toThrow(
+			"idempotency_conflict",
+		);
+		await expect(
+			createNetlifyBatch({ ...normalized.body, brandName: "Other" }, "test:api-key", binding, configs),
+		).rejects.toThrow("request_binding_mismatch");
+		expect(await processNetlifyCellBatch(binding.batchId, binding.requestHash)).toBe("processed");
+		const first = await readNetlifyBatch(binding, 1, 7);
+		const second = await readNetlifyBatch(binding, 2, 7);
+		expect(first.status).toBe("completed");
+		expect([...first.cells, ...second.cells]).toHaveLength(12);
+		expect(first.cells.every((cell) => cell.status === "complete" && cell.observedAt)).toBe(true);
+		await expect(readNetlifyBatch({ ...binding, requestHash: `sha256:${"b".repeat(64)}` }, 1, 100)).rejects.toThrow(
+			"batch_not_found",
+		);
+		await expect(readNetlifyBatch(binding, 0, 100)).rejects.toThrow("invalid_pagination");
+	});
+
+	it("Netlify concurrent delivery and replay execute one twelve-cell batch", async () => {
+		process.env.DYREP_GEO_EXECUTION_MODE = "netlify";
+		const batchId = await seedBatch();
+		const normalized = normalizeCellBatchRequest({
+			targetRef,
+			brandName: "DyReP",
+			brandWebsite,
+			queries: [1, 2].map((index) => ({ queryRef: `query-${index}`, text: `Question ${index}` })),
+			surfaces: ["chatgpt-search", "google-ai", "perplexity"],
+			repetitions: 2,
+		});
+		await pool.query("update cell_batches set request_body=$2::json,request_hash=$3 where id=$1", [
+			batchId,
+			normalized.body,
+			normalized.requestHash,
+		]);
+		const results = await Promise.all([
+			processNetlifyCellBatch(batchId, normalized.requestHash),
+			processNetlifyCellBatch(batchId, normalized.requestHash),
+		]);
+		expect(results.sort()).toEqual(["not_claimed", "processed"]);
+		expect(provider.run).toHaveBeenCalledTimes(12);
+		expect(await processNetlifyCellBatch(batchId, normalized.requestHash)).toBe("not_claimed");
+		expect(provider.run).toHaveBeenCalledTimes(12);
+		expect((await state(batchId)).batch).toBe("completed");
+	});
+
+	it("Netlify leaves processing cells untouched and disables queue execution", async () => {
+		process.env.DYREP_GEO_EXECUTION_MODE = "netlify";
+		const batchId = await seedBatch({ batchStatus: "processing", cellStatuses: Array(12).fill("running") });
+		expect(await processNetlifyCellBatch(batchId, `sha256:${"a".repeat(64)}`)).toBe("not_claimed");
+		await processCellBatchJob(job(batchId));
+		expect((await state(batchId)).cells.every((cell) => cell.status === "running")).toBe(true);
+		expect(provider.run).not.toHaveBeenCalled();
+	});
 
 	it.each(["failed", "completed"] as const)("keeps a %s batch terminal on redelivery", async (terminalStatus) => {
 		const cellStatus = terminalStatus === "completed" ? "complete" : "failed";

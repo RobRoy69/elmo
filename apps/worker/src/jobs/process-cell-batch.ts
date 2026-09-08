@@ -1,5 +1,6 @@
 import {
 	executeCellBatchTargetBound,
+	normalizeCellBatchRequest,
 	recoveryAction,
 	resolveCellSurfaceConfigs,
 	validateCellBatchTargetBinding,
@@ -206,8 +207,13 @@ async function finalizeBatch(batchId: string): Promise<void> {
 		.where(and(eq(cellBatches.id, batchId), eq(cellBatches.status, "processing")));
 }
 
-async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<void> {
-	if (!(await prepareBatch(batch.id, new Date()))) return;
+async function processBatch(
+	batch: CellBatch,
+	configs: SurfaceConfigs,
+	claimed = false,
+	deadline = Infinity,
+): Promise<void> {
+	if (!claimed && !(await prepareBatch(batch.id, new Date()))) return;
 	const bindingFailure = validateCellBatchTargetBinding(
 		process.env.DYREP_GEO_TARGET_REF,
 		batch.targetRef,
@@ -232,6 +238,10 @@ async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<
 		return;
 	}
 	for (const cell of cells) {
+		if (Date.now() >= deadline) {
+			await failBatch(batch.id, "execution_deadline_reached");
+			return;
+		}
 		const [current] = await db
 			.select({ status: cellBatches.status })
 			.from(cellBatches)
@@ -246,7 +256,46 @@ async function processBatch(batch: CellBatch, configs: SurfaceConfigs): Promise<
 	await finalizeBatch(batch.id);
 }
 
+export async function processNetlifyCellBatch(batchId: string, requestHash: string): Promise<string> {
+	if (process.env.DYREP_GEO_EXECUTION_MODE !== "netlify") throw new Error("netlify_execution_mode_required");
+	const [batch] = await db.select().from(cellBatches).where(eq(cellBatches.id, batchId)).limit(1);
+	if (batch?.status !== "pending") return "not_claimed";
+	if (
+		batch.targetRef !== "dyrep-org" ||
+		batch.requestHash !== requestHash ||
+		validateCellBatchTargetBinding(process.env.DYREP_GEO_TARGET_REF, batch.targetRef, batch.brandWebsite)
+	) {
+		throw new Error("netlify_batch_binding_invalid");
+	}
+	const normalized = normalizeCellBatchRequest(batch.requestBody);
+	if (normalized.requestHash !== requestHash) throw new Error("netlify_batch_request_hash_invalid");
+	const configs = resolveCellSurfaceConfigs(parseScrapeTargets(process.env.SCRAPE_TARGETS));
+	// Netlify can deliver concurrently or retry after a timeout. Only pending is
+	// claimable; processing requires explicit reconciliation, never paid replay.
+	const claimed = await db
+		.update(cellBatches)
+		.set({ status: "processing", updatedAt: new Date() })
+		.where(
+			and(
+				eq(cellBatches.id, batchId),
+				eq(cellBatches.status, "pending"),
+				eq(cellBatches.targetRef, "dyrep-org"),
+				eq(cellBatches.requestHash, requestHash),
+			),
+		)
+		.returning();
+	if (claimed.length !== 1) return "not_claimed";
+	try {
+		await processBatch(claimed[0], configs, true, Date.now() + 12 * 60_000);
+	} catch {
+		await failBatch(batchId, "netlify_execution_outcome_unknown");
+		throw new Error("netlify_batch_execution_failed");
+	}
+	return "processed";
+}
+
 export async function processCellBatchJob(jobs: Job<ProcessCellBatchData>[]): Promise<void> {
+	if (process.env.DYREP_GEO_EXECUTION_MODE === "netlify") return;
 	let configs: SurfaceConfigs | undefined;
 	for (const job of jobs) {
 		const [batch] = await db.select().from(cellBatches).where(eq(cellBatches.id, job.data.batchId)).limit(1);

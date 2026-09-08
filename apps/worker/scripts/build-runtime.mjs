@@ -58,15 +58,36 @@ function resolveExport(specifier) {
 	return path.resolve(workspacePackage.directory, target);
 }
 
+const netlify = process.argv.includes("--netlify");
 await build({
 	absWorkingDir: repoRoot,
-	entryPoints: ["apps/worker/src/index.ts"],
-	outfile: "apps/worker/dist-runtime/index.mjs",
+	entryPoints: netlify
+		? [
+				"apps/worker/netlify/functions/dyrep-cell-background.mts",
+				"apps/worker/netlify/functions/dyrep-cell-api.mts",
+				"apps/worker/netlify/functions/dyrep-perplexity-diagnostic.mts",
+			]
+		: ["apps/worker/src/index.ts"],
+	...(netlify
+		? {
+				outdir: "apps/worker/dist-runtime/netlify",
+				splitting: true,
+				outExtension: { ".js": ".mjs" },
+				chunkNames: "_shared/[name]-[hash]",
+			}
+		: { outfile: "apps/worker/dist-runtime/index.mjs" }),
 	bundle: true,
 	format: "esm",
 	platform: "node",
 	target: "node24",
-	packages: "external",
+	...(netlify
+		? {
+				external: ["pg-native", "cloudflare:sockets"],
+				banner: {
+					js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+				},
+			}
+		: { packages: "external" }),
 	plugins: [
 		{
 			name: "bundle-workspace-packages",

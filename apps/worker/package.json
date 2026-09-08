@@ -17,6 +17,7 @@
 		"@anthropic-ai/sdk": "^0.117.1",
 		"@brightdata/sdk": "^1.2.0",
 		"@mozilla/readability": "^0.6.0",
+		"@netlify/blobs": "11.0.1",
 		"@sentry/node": "^10.70.0",
 		"ai": "^7.0.66",
 		"auth0": "^6.2.0",

@@ -1,0 +1,39 @@
+name: DyReP Netlify worker
+on:
+  push:
+    branches: [dyrep/netlify-worker-20260908]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: elmo_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d elmo_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
+      ELMO_WORKER_TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/elmo_test
+      ELMO_WORKER_TEST_DISPOSABLE_DATABASE: "1"
+      ELMO_WORKER_TEST_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --filter @workspace/worker...
+      - run: node apps/worker/scripts/check-storage-bootstrap.mjs
+      - run: pnpm -C packages/lib exec drizzle-kit migrate
+      - run: pnpm --filter @workspace/worker exec vitest run src/netlify-database.test.ts src/netlify-cell-handler.test.ts src/jobs/process-cell-batch.integration.test.ts src/olostep-batch-client.test.ts src/olostep-batch-errors.test.ts src/olostep-batch-step.integration.test.ts src/perplexity-diagnostic.test.ts src/diagnostic-blobs.test.ts
+      - run: pnpm --filter @workspace/worker exec node scripts/build-runtime.mjs --netlify
+      - run: timeout 15s node apps/worker/scripts/check-netlify-runtime.mjs
