@@ -198,12 +198,13 @@ export async function runOlostepBatchStep(pool: Pool, binding: BatchBinding, pro
 		try {
 			const id = await provider.submit(claimed.request_body);
 			if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error("provider_identifier_invalid");
-			await pool.query(
+			const saved = await pool.query(
 				`UPDATE public.dyrep_provider_submissions SET status='submitted',provider_id=$1,
 				submitted_at=now(),next_poll_at=now()+interval '30 seconds',updated_at=now()
 				WHERE batch_id=$2 AND surface=$3 AND status='submitting'`,
 				[id, claimed.batch_id, claimed.surface],
 			);
+			if (saved.rowCount !== 1) throw new Error("provider_submission_not_saved");
 			return "submitted";
 		} catch {
 			await pool.query(

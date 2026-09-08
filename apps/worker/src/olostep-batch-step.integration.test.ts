@@ -146,6 +146,31 @@ const configs = ["chatgpt", "google-ai-mode", "perplexity"].map((model) => ({
 		expect(submit).toHaveBeenCalledTimes(3);
 		expect(collect).toHaveBeenCalledTimes(3);
 	});
+	it("keeps a partial provider failure visible instead of marking the batch complete", async () => {
+		await submitAll();
+		collect.mockImplementationOnce(async (_id, body) =>
+			body.items.map((item, index) => ({
+				cellId: item.custom_id,
+				text: index === 0 ? "" : "DyReP answer",
+				citations: [],
+				modelVersion: "not_reported",
+				errorCode: index === 0 ? "provider_answer_missing" : null,
+				raw: {},
+			})),
+		);
+		for (let n = 0; n < 3; n++) {
+			await due();
+			await runOlostepBatchStep(runtime, binding, provider);
+		}
+		expect((await pool.query("SELECT status FROM cell_batches")).rows[0].status).toBe("failed");
+		expect(
+			(await pool.query("SELECT count(*)::int count FROM cell_batch_cells WHERE status='complete'")).rows[0].count,
+		).toBe(11);
+		expect(
+			(await pool.query("SELECT brand_mentioned FROM cell_batch_cells WHERE status='failed'")).rows[0].brand_mentioned,
+		).toBeNull();
+	});
+
 	it("does not re-send a POST whose outcome is unknown", async () => {
 		submit.mockRejectedValueOnce(new Error("lost response"));
 		expect(await runOlostepBatchStep(runtime, binding, provider)).toBe("outcome_unknown");
