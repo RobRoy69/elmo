@@ -62,9 +62,14 @@ const netlify = process.argv.includes("--netlify");
 await build({
 	absWorkingDir: repoRoot,
 	entryPoints: [netlify ? "apps/worker/netlify/functions/dyrep-cell-background.mts" : "apps/worker/src/index.ts"],
-	outfile: netlify
-		? "apps/worker/dist-runtime/netlify/dyrep-cell-background.mjs"
-		: "apps/worker/dist-runtime/index.mjs",
+	...(netlify
+		? {
+				outdir: "apps/worker/dist-runtime/netlify",
+				splitting: true,
+				outExtension: { ".js": ".mjs" },
+				chunkNames: "_shared/[name]-[hash]",
+			}
+		: { outfile: "apps/worker/dist-runtime/index.mjs" }),
 	bundle: true,
 	format: "esm",
 	platform: "node",
