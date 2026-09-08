@@ -77,6 +77,23 @@ export default async (request: Request, context: { site: { id: string } }) => {
 	}
 	const url = new URL(request.url);
 	try {
+		if (request.method === "POST" && url.pathname === `/api/v1/cell-batches/${batchId}/advance`) {
+			if (Netlify.env.get("DYREP_GEO_NETLIFY_EXECUTION_ENABLED") !== "true") {
+				return response({ error: "execution_disabled" }, 409);
+			}
+			const workerToken = Netlify.env.get("DYREP_GEO_NETLIFY_WORKER_TOKEN");
+			if (!workerToken || workerToken.length < 32) return response({ error: "unavailable" }, 503);
+			const dispatched = await fetch("https://geo-pilot-dyrep-org.netlify.app/internal/geo/cell-batch", {
+				method: "POST",
+				headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json" },
+				body: JSON.stringify({ batchId }),
+				redirect: "error",
+				signal: AbortSignal.timeout(15000),
+			});
+			return dispatched.status === 202
+				? response({ batchId, status: "accepted", completionProven: false }, 202)
+				: response({ error: "dispatch_failed" }, 503);
+		}
 		if (request.method === "POST" && url.pathname === "/api/v1/cell-batches") {
 			const body = await readBody(request);
 			const { parseScrapeTargets } = await import("@workspace/config/scrape-targets");
@@ -101,6 +118,16 @@ export default async (request: Request, context: { site: { id: string } }) => {
 				),
 				200,
 			);
+		}
+		if (request.method === "GET" && url.pathname === `/api/v1/cell-batches/${batchId}/provider-progress`) {
+			const { readNetlifyBatch } = await import("../../src/netlify-cell-api.js");
+			await readNetlifyBatch({ batchId, requestHash }, 1, 1);
+			const { db } = await import("@workspace/lib/db/db");
+			const { rows } = await db.$client.query(
+				"SELECT surface,status,provider_id,poll_attempts,next_poll_at,error_code,updated_at FROM public.dyrep_provider_submissions WHERE batch_id=$1 ORDER BY surface",
+				[batchId],
+			);
+			return response({ batchId, submissions: rows }, 200);
 		}
 		return response({ error: "not_found" }, 404);
 	} catch (error) {
