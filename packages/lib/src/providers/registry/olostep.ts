@@ -1,7 +1,7 @@
 import Olostep from "olostep";
 import { WEB_QUERIES_UNAVAILABLE } from "../../constants";
 import { getCredential } from "../../secrets";
-import { type Citation, normalizeCitationTitle } from "../../text-extraction";
+import { extractCitationsFromOlostep } from "../../text-extraction";
 import type { ModelConfig, Provider, ProviderOptions, ScrapeResult } from "../types";
 
 const OLOSTEP_PARSERS: Record<string, { parserId: string; urlTemplate: (q: string) => string; credits: number }> = {
@@ -51,33 +51,13 @@ function getClient(): Olostep {
 }
 
 function extractTextFromOlostep(data: any): string {
-	if (data?.result?.markdown_content) return data.result.markdown_content;
-	if (data?.answer_markdown) return data.answer_markdown;
-	if (data?.result?.text_content) return data.result.text_content;
-	if (typeof data?.answer === "string") return data.answer;
-	return "No text content found in Olostep response.";
-}
-
-function extractCitationsFromOlostep(data: any): Citation[] {
-	const citations: Citation[] = [];
-	const sources = data?.sources ?? data?.citations ?? data?.result?.links_on_page ?? data?.inline_references ?? [];
-	let idx = 0;
-	for (const source of Array.isArray(sources) ? sources : []) {
-		const url = typeof source === "string" ? source : source?.url;
-		if (!url || typeof url !== "string") continue;
-		try {
-			const parsed = new URL(url);
-			citations.push({
-				url,
-				title: normalizeCitationTitle(source?.title ?? source?.label),
-				domain: parsed.hostname.replace(/^www\./, ""),
-				citationIndex: idx++,
-			});
-		} catch (e) {
-			console.warn(`Olostep: skipping invalid citation URL: ${url}`, e);
-		}
-	}
-	return citations;
+	if (typeof data?.result?.markdown_content === "string" && data.result.markdown_content.trim())
+		return data.result.markdown_content;
+	if (typeof data?.answer_markdown === "string" && data.answer_markdown.trim()) return data.answer_markdown;
+	if (typeof data?.result?.text_content === "string" && data.result.text_content.trim())
+		return data.result.text_content;
+	if (typeof data?.answer === "string" && data.answer.trim()) return data.answer;
+	throw new Error("olostep_answer_missing");
 }
 
 function extractWebQueries(data: any): string[] {

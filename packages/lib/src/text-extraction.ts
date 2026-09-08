@@ -527,9 +527,14 @@ export function extractCitationsFromOpenRouter(rawOutput: any): Citation[] {
 export function extractCitationsFromOlostep(rawOutput: any): Citation[] {
 	return collectCitations((add) => {
 		const jsonStr = rawOutput?.json_content ?? rawOutput?.result?.json_content;
-		const parsed = typeof jsonStr === "string" ? JSON.parse(jsonStr) : rawOutput;
-		const sources = parsed?.sources ?? parsed?.result?.links_on_page ?? parsed?.inline_references;
+		const parsed = typeof jsonStr === "string" ? JSON.parse(jsonStr) : (jsonStr ?? rawOutput);
+		// Inline references prove citation even when the source drawer is empty.
+		for (const source of asArray(parsed?.inline_references)) {
+			add(source?.url, source?.title ?? source?.text);
+		}
+		const sources = parsed?.sources ?? parsed?.citations ?? parsed?.result?.links_on_page;
 		for (const source of asArray(sources)) {
+			if (source?.cited === false) continue;
 			if (typeof source === "string") add(source);
 			else add(source?.url, source?.title ?? source?.label);
 		}
