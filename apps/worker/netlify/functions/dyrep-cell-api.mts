@@ -61,6 +61,24 @@ function errorResponse(error: unknown) {
 		: response({ error: "request_failed", reason: netlifyFailureReason(error) }, 503);
 }
 
+async function advanceBatch(batchId: string) {
+	if (Netlify.env.get("DYREP_GEO_NETLIFY_EXECUTION_ENABLED") !== "true") {
+		return response({ error: "execution_disabled" }, 409);
+	}
+	const workerToken = Netlify.env.get("DYREP_GEO_NETLIFY_WORKER_TOKEN");
+	if (!workerToken || workerToken.length < 32) return response({ error: "unavailable" }, 503);
+	const dispatched = await fetch("https://geo-pilot-dyrep-org.netlify.app/internal/geo/cell-batch", {
+		method: "POST",
+		headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json" },
+		body: JSON.stringify({ batchId }),
+		redirect: "error",
+		signal: AbortSignal.timeout(15000),
+	});
+	return dispatched.status === 202
+		? response({ batchId, status: "accepted", completionProven: false }, 202)
+		: response({ error: "dispatch_failed" }, 503);
+}
+
 export default async (request: Request, context: { site: { id: string } }) => {
 	if (
 		context.site.id !== "1ac9542d-dc7c-4c22-be2c-0ad5d495fcd9" ||
@@ -78,21 +96,7 @@ export default async (request: Request, context: { site: { id: string } }) => {
 	const url = new URL(request.url);
 	try {
 		if (request.method === "POST" && url.pathname === `/api/v1/cell-batches/${batchId}/advance`) {
-			if (Netlify.env.get("DYREP_GEO_NETLIFY_EXECUTION_ENABLED") !== "true") {
-				return response({ error: "execution_disabled" }, 409);
-			}
-			const workerToken = Netlify.env.get("DYREP_GEO_NETLIFY_WORKER_TOKEN");
-			if (!workerToken || workerToken.length < 32) return response({ error: "unavailable" }, 503);
-			const dispatched = await fetch("https://geo-pilot-dyrep-org.netlify.app/internal/geo/cell-batch", {
-				method: "POST",
-				headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json" },
-				body: JSON.stringify({ batchId }),
-				redirect: "error",
-				signal: AbortSignal.timeout(15000),
-			});
-			return dispatched.status === 202
-				? response({ batchId, status: "accepted", completionProven: false }, 202)
-				: response({ error: "dispatch_failed" }, 503);
+			return advanceBatch(batchId);
 		}
 		if (request.method === "POST" && url.pathname === "/api/v1/cell-batches") {
 			const body = await readBody(request);
