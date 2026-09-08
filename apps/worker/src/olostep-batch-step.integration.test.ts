@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { normalizeCellBatchRequest, planCellCoordinates, resolveCellSurfaceConfigs } from "@workspace/lib/cell-batches";
 import { Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderRequest } from "./olostep-batch-client.js";
+import type { BatchProvider, ProviderRequest } from "./olostep-batch-client.js";
 import { runOlostepBatchStep } from "./olostep-batch-step.js";
 
 const source = process.env.ELMO_WORKER_TEST_DATABASE_URL;
@@ -49,7 +49,7 @@ const configs = ["chatgpt", "google-ai-mode", "perplexity"].map((model) => ({
 	let runtime: Pool;
 	const database = `elmo_async_${randomUUID().replaceAll("-", "")}`;
 	const submit = vi.fn(async (body: ProviderRequest) => body.parser.id.replaceAll(/[^a-z-]/g, ""));
-	const collect = vi.fn(async (_id: string, body: ProviderRequest) =>
+	const collect = vi.fn<BatchProvider["collect"]>(async (_id, body) =>
 		body.items.map((item) => ({
 			cellId: item.custom_id,
 			text: "DyReP answer",
