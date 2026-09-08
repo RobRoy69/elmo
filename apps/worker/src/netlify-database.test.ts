@@ -6,6 +6,14 @@ const connection =
 	"postgresql://geo_elmo_netlify_dyrep_r1:test-only@db.phhirxlgiwopfqzyxakm.supabase.co:5432/postgres?sslmode=verify-full";
 
 describe("Netlify database isolation", () => {
+	it("accepts only the same preview role through the IPv4 session pooler", () => {
+		const pooled = connection
+			.replace("geo_elmo_netlify_dyrep_r1:", "geo_elmo_netlify_dyrep_r1.phhirxlgiwopfqzyxakm:")
+			.replace("db.phhirxlgiwopfqzyxakm.supabase.co", "aws-1-eu-west-1.pooler.supabase.com");
+		expect(netlifyPoolConfig(pooled).ssl).toMatchObject({ rejectUnauthorized: true });
+		expect(() => netlifyPoolConfig(pooled.replace("phhirxlgiwopfqzyxakm:", "other:"))).toThrow();
+		expect(() => netlifyPoolConfig(pooled.replace(":5432/", ":6543/"))).toThrow();
+	});
 	it("reports a safe nested failure category without exposing error text", () => {
 		const cause = Object.assign(new Error("secret-database-connection"), { code: "ECONNREFUSED" });
 		expect(netlifyFailureReason(new Error("sensitive query", { cause }))).toBe("database_unreachable");
