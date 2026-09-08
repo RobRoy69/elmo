@@ -23,3 +23,10 @@ try {
 	console.log = originalLog;
 }
 console.log("PASS packaged worker refuses disabled and unauthorized execution without provider configuration");
+
+const { default: api } = await import("../dist-runtime/netlify/dyrep-cell-api.mjs");
+settings.set("DYREP_GEO_NETLIFY_API_TOKEN", "fixture-api-token-".repeat(3));
+const denied = await api(new Request("https://example.test/api/v1/cell-batches"), context);
+assert.equal(denied.status, 401);
+assert.equal(denied.headers.get("cache-control"), "no-store");
+console.log("PASS packaged API refuses unauthorized requests before database access");

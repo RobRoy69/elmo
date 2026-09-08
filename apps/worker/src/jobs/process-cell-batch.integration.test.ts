@@ -3,6 +3,7 @@ import { normalizeCellBatchRequest } from "@workspace/lib/cell-batches";
 import { Pool } from "pg";
 import type { Job } from "pg-boss";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createNetlifyBatch, readNetlifyBatch } from "../netlify-cell-api.js";
 
 const provider = vi.hoisted(() => ({
 	run: vi.fn(),
@@ -143,6 +144,46 @@ databaseDescribe("processCellBatchJob database lifecycle", () => {
 			cells: cells.rows as Array<{ status: string; error_code: string | null }>,
 		};
 	}
+
+	it("Netlify API atomically creates twelve cells, replays and exports the processed batch", async () => {
+		process.env.DYREP_GEO_EXECUTION_MODE = "netlify";
+		const normalized = normalizeCellBatchRequest({
+			targetRef,
+			brandName: "DyReP",
+			brandWebsite,
+			queries: [1, 2].map((index) => ({ queryRef: `query-${index}`, text: `Question ${index}` })),
+			surfaces: ["chatgpt-search", "google-ai", "perplexity"],
+			repetitions: 2,
+		});
+		const binding = { batchId: randomUUID(), requestHash: normalized.requestHash };
+		const configs = ["chatgpt", "google-ai-mode", "perplexity"].map((model) => ({
+			model,
+			provider: "stub",
+			webSearch: false,
+		}));
+		const results = await Promise.all([
+			createNetlifyBatch(normalized.body, "test:api-key", binding, configs),
+			createNetlifyBatch(normalized.body, "test:api-key", binding, configs),
+		]);
+		expect(results.map((result) => result.idempotentReplay).sort()).toEqual([false, true]);
+		expect((await readNetlifyBatch(binding, 1, 7)).pagination.total).toBe(12);
+		await expect(createNetlifyBatch(normalized.body, "test:other-key", binding, configs)).rejects.toThrow(
+			"idempotency_conflict",
+		);
+		await expect(
+			createNetlifyBatch({ ...normalized.body, brandName: "Other" }, "test:api-key", binding, configs),
+		).rejects.toThrow("request_binding_mismatch");
+		expect(await processNetlifyCellBatch(binding.batchId, binding.requestHash)).toBe("processed");
+		const first = await readNetlifyBatch(binding, 1, 7);
+		const second = await readNetlifyBatch(binding, 2, 7);
+		expect(first.status).toBe("completed");
+		expect([...first.cells, ...second.cells]).toHaveLength(12);
+		expect(first.cells.every((cell) => cell.status === "complete" && cell.observedAt)).toBe(true);
+		await expect(readNetlifyBatch({ ...binding, requestHash: `sha256:${"b".repeat(64)}` }, 1, 100)).rejects.toThrow(
+			"batch_not_found",
+		);
+		await expect(readNetlifyBatch(binding, 0, 100)).rejects.toThrow("invalid_pagination");
+	});
 
 	it("Netlify concurrent delivery and replay execute one twelve-cell batch", async () => {
 		process.env.DYREP_GEO_EXECUTION_MODE = "netlify";
