@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
 const settings = new Map();
 globalThis.Netlify = { env: { get: (key) => settings.get(key) } };
@@ -30,3 +31,11 @@ const denied = await api(new Request("https://example.test/api/v1/cell-batches")
 assert.equal(denied.status, 401);
 assert.equal(denied.headers.get("cache-control"), "no-store");
 console.log("PASS packaged API refuses unauthorized requests before database access");
+const entry = new URL("../dist-runtime/netlify/dyrep-cell-api.mjs", import.meta.url);
+const source = await readFile(entry, "utf8");
+const servicePath = source.match(/import\("(\.\/_shared\/netlify-cell-api-[^"]+\.mjs)"\)/)?.[1];
+assert.ok(servicePath, "API service chunk must be present");
+process.env.DATABASE_URL = "postgresql://localhost/not_connected";
+const service = await import(new URL(servicePath, entry).href);
+assert.equal(typeof service.readNetlifyBatch, "function");
+console.log("PASS packaged API database dependencies load without a database connection");

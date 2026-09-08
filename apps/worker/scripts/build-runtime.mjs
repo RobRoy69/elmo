@@ -76,7 +76,14 @@ await build({
 	format: "esm",
 	platform: "node",
 	target: "node24",
-	packages: "external",
+	...(netlify
+		? {
+				external: ["pg-native", "cloudflare:sockets"],
+				banner: {
+					js: 'import { createRequire as createNodeRequire } from "node:module"; const require = createNodeRequire(import.meta.url);',
+				},
+			}
+		: { packages: "external" }),
 	plugins: [
 		{
 			name: "bundle-workspace-packages",
