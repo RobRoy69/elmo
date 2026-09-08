@@ -70,7 +70,9 @@ function boundItems(
 		[failed, false],
 	] as const) {
 		if (
-			listing.batch_id !== id ||
+			(listing.batch_id ?? listing.id) !== id ||
+			(listing.batch_id != null && listing.batch_id !== id) ||
+			(listing.id != null && listing.id !== id) ||
 			!Array.isArray(listing.items) ||
 			listing.cursor != null ||
 			listing.next_cursor != null

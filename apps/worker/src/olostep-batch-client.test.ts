@@ -5,7 +5,20 @@ const body = providerRequest(
 	"chatgpt-search",
 	[1, 2, 3, 4].map((n) => ({ id: `cell-${n}`, query_text: `Vraag ${n}` })),
 );
-function transport(options: { duplicate?: boolean; missing?: boolean; wrongPrompt?: boolean; waiting?: boolean } = {}) {
+function transport(
+	options: {
+		duplicate?: boolean;
+		missing?: boolean;
+		wrongPrompt?: boolean;
+		waiting?: boolean;
+		liveId?: boolean;
+		conflictingId?: boolean;
+	} = {},
+) {
+	const envelope = {
+		...(options.liveId ? { id: "batch-test" } : { batch_id: "batch-test" }),
+		...(options.conflictingId ? { id: "other-batch" } : {}),
+	};
 	return vi.fn<typeof fetch>(async (url) => {
 		const path = new URL(String(url)).pathname;
 
@@ -13,7 +26,10 @@ function transport(options: { duplicate?: boolean; missing?: boolean; wrongPromp
 			const failed = String(url).includes("status=failed");
 			const items = failed ? [] : body.items.map((item, index) => ({ ...item, retrieve_id: `ret-${index}` }));
 			if (options.duplicate && !failed) items[1] = items[0];
-			return Response.json({ batch_id: "batch-test", items });
+			return Response.json({
+				...envelope,
+				items,
+			});
 		}
 		if (path.endsWith("/retrieve")) {
 			const index = Number(new URL(String(url)).searchParams.get("retrieve_id")!.split("-")[1]);
@@ -60,6 +76,14 @@ describe("bounded Olostep batch transport", () => {
 	it("records missing answers as failures, not brand absence", async () => {
 		const result = await createOlostepBatchClient("test", transport({ missing: true })).collect("batch-test", body);
 		expect(result?.every((item) => item.errorCode === "provider_answer_missing" && item.text === null)).toBe(true);
+	});
+	it("collects the live API id envelope and rejects conflicting batch identifiers", async () => {
+		expect(
+			await createOlostepBatchClient("test", transport({ liveId: true })).collect("batch-test", body),
+		).toHaveLength(4);
+		await expect(
+			createOlostepBatchClient("test", transport({ conflictingId: true })).collect("batch-test", body),
+		).rejects.toThrow("provider_items_invalid");
 	});
 	it("rejects a provider ID containing a URL before network access", async () => {
 		const send = transport();
