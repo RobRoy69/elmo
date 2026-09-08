@@ -58,10 +58,13 @@ function resolveExport(specifier) {
 	return path.resolve(workspacePackage.directory, target);
 }
 
+const netlify = process.argv.includes("--netlify");
 await build({
 	absWorkingDir: repoRoot,
-	entryPoints: ["apps/worker/src/index.ts"],
-	outfile: "apps/worker/dist-runtime/index.mjs",
+	entryPoints: [netlify ? "apps/worker/netlify/functions/dyrep-cell-background.mts" : "apps/worker/src/index.ts"],
+	outfile: netlify
+		? "apps/worker/dist-runtime/netlify/dyrep-cell-background.mjs"
+		: "apps/worker/dist-runtime/index.mjs",
 	bundle: true,
 	format: "esm",
 	platform: "node",
