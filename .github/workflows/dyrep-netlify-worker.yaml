@@ -32,6 +32,7 @@ jobs:
           node-version: 24
       - run: corepack enable
       - run: pnpm install --frozen-lockfile --filter @workspace/worker...
+      - run: node apps/worker/scripts/check-storage-bootstrap.mjs
       - run: pnpm -C packages/lib exec drizzle-kit migrate
       - run: pnpm --filter @workspace/worker exec vitest run src/netlify-cell-handler.test.ts src/jobs/process-cell-batch.integration.test.ts
       - run: pnpm --filter @workspace/worker exec node scripts/build-runtime.mjs --netlify
