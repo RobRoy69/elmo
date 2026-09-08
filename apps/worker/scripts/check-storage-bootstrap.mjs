@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { storageBootstrapSQL } from "./dyrep-storage-bootstrap.mjs";
 
@@ -35,6 +36,8 @@ try {
 			}
 		}
 	}
+	await client.query(readFileSync(new URL("./dyrep-runtime-role.sql", import.meta.url), "utf8"));
+	await client.query(readFileSync(new URL("./check-runtime-role.sql", import.meta.url), "utf8"));
 	await client.query("rollback");
 	assert.equal((await client.query("select to_regclass('public.cell_batches') as batches")).rows[0].batches, null);
 	console.log("PASS minimal storage bootstrap: two RLS tables, 24 denied privilege checks, rollback leaves no tables");
