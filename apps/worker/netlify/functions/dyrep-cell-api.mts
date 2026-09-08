@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { netlifyFailureReason } from "../../src/netlify-cell-errors.js";
 
 declare const Netlify: { env: { get: (name: string) => string | undefined } };
 
@@ -57,7 +58,7 @@ function errorResponse(error: unknown) {
 	};
 	return Object.hasOwn(statuses, code)
 		? response({ error: code }, statuses[code])
-		: response({ error: "request_failed" }, 503);
+		: response({ error: "request_failed", reason: netlifyFailureReason(error) }, 503);
 }
 
 export default async (request: Request, context: { site: { id: string } }) => {

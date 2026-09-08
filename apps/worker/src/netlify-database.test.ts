@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { netlifyPoolConfig } from "../../../packages/lib/src/db/netlify-pool";
+import { netlifyFailureReason } from "./netlify-cell-errors";
 
 const connection =
 	"postgresql://geo_elmo_netlify_dyrep_r1:test-only@db.phhirxlgiwopfqzyxakm.supabase.co:5432/postgres?sslmode=verify-full";
 
 describe("Netlify database isolation", () => {
+	it("reports a safe nested failure category without exposing error text", () => {
+		const cause = Object.assign(new Error("secret-database-connection"), { code: "ECONNREFUSED" });
+		expect(netlifyFailureReason(new Error("sensitive query", { cause }))).toBe("database_unreachable");
+		expect(netlifyFailureReason(new Error("secret-database-connection"))).toBe("runtime_unavailable");
+	});
 	it("requires verified TLS and limits connections", () => {
 		const config = netlifyPoolConfig(connection);
 		expect(config.max).toBe(1);
