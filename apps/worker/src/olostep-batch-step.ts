@@ -34,6 +34,25 @@ const models: Record<string, string> = {
 	perplexity: "perplexity",
 };
 
+export function collectionErrorCode(error: unknown): string {
+	const allowed = new Set([
+		"provider_payload_too_large",
+		"provider_http_failed",
+		"provider_payload_invalid",
+		"provider_binding_mismatch",
+		"provider_batch_not_completed",
+		"provider_outcomes_invalid",
+		"provider_cell_state_conflict",
+		"provider_identifier_invalid",
+		"provider_items_invalid",
+		"provider_item_binding_mismatch",
+		"provider_items_incomplete",
+		"provider_prompt_mismatch",
+		"provider_matrix_invalid",
+	]);
+	return error instanceof Error && allowed.has(error.message) ? error.message : "collection_requires_retry_or_review";
+}
+
 async function transaction<T>(pool: Pool, run: (client: PoolClient) => Promise<T>): Promise<T> {
 	const client = await pool.connect();
 	try {
@@ -237,11 +256,11 @@ export async function runOlostepBatchStep(pool: Pool, binding: BatchBinding, pro
 		if (outcomes === null) return "waiting";
 		await finish(pool, poll, outcomes);
 		return "collected";
-	} catch {
+	} catch (error) {
 		await pool.query(
-			`UPDATE public.dyrep_provider_submissions SET error_code='collection_requires_retry_or_review',updated_at=now()
+			`UPDATE public.dyrep_provider_submissions SET error_code=$3,updated_at=now()
 			WHERE batch_id=$1 AND surface=$2 AND status='submitted'`,
-			[poll.batch_id, poll.surface],
+			[poll.batch_id, poll.surface, collectionErrorCode(error)],
 		);
 		return "collection_requires_retry_or_review";
 	}
