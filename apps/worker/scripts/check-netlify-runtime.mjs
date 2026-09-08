@@ -31,6 +31,14 @@ const denied = await api(new Request("https://example.test/api/v1/cell-batches")
 assert.equal(denied.status, 401);
 assert.equal(denied.headers.get("cache-control"), "no-store");
 console.log("PASS packaged API refuses unauthorized requests before database access");
+const { default: diagnostic } = await import("../dist-runtime/netlify/dyrep-perplexity-diagnostic.mjs");
+const deniedDiagnostic = await diagnostic(
+	new Request("https://example.test/internal/geo/perplexity-diagnostic/submit", { method: "POST" }),
+	context,
+);
+assert.equal(deniedDiagnostic.status, 401);
+assert.equal(deniedDiagnostic.headers.get("cache-control"), "no-store");
+console.log("PASS packaged diagnostic refuses unauthorized requests before storage access");
 const entry = new URL("../dist-runtime/netlify/dyrep-cell-api.mjs", import.meta.url);
 const source = await readFile(entry, "utf8");
 const servicePath = source.match(/import\("(\.\/_shared\/netlify-cell-api-[^"]+\.mjs)"\)/)?.[1];
