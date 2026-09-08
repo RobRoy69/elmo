@@ -85,6 +85,19 @@ describe("bounded Olostep batch transport", () => {
 			createOlostepBatchClient("test", transport({ conflictingId: true })).collect("batch-test", body),
 		).rejects.toThrow("provider_items_invalid");
 	});
+	it.each([false, true])("accepts equivalent space encoding but rejects extra query parameters: %s", async (extra) => {
+		const original = transport({ liveId: true });
+		const encoded: typeof fetch = async (url, init) => {
+			const response = await original(url, init);
+			if (!new URL(String(url)).pathname.endsWith("/items")) return response;
+			const payload = await response.json();
+			for (const item of payload.items) item.url = item.url.replaceAll("%20", "+") + (extra ? "&other=1" : "");
+			return Response.json(payload);
+		};
+		const result = createOlostepBatchClient("test", encoded).collect("batch-test", body);
+		if (extra) await expect(result).rejects.toThrow("provider_item_binding_mismatch");
+		else expect(await result).toHaveLength(4);
+	});
 	it("rejects a provider ID containing a URL before network access", async () => {
 		const send = transport();
 		await expect(createOlostepBatchClient("test", send).collect("https://other.example", body)).rejects.toThrow();

@@ -56,6 +56,29 @@ function identifier(value: unknown): string {
 	return value;
 }
 
+function matchesRequestUrl(value: unknown, expected: string): boolean {
+	if (typeof value !== "string") return false;
+	const actual = new URL(value);
+	const source = new URL(expected);
+	if (
+		actual.origin !== source.origin ||
+		actual.pathname !== source.pathname ||
+		actual.hash ||
+		actual.username ||
+		actual.password
+	)
+		return false;
+	if (actual.searchParams.getAll("q").length !== 1 || actual.searchParams.get("q") !== source.searchParams.get("q"))
+		return false;
+	if (
+		actual.hostname === "www.google.com" &&
+		actual.searchParams.getAll("gl").length === 1 &&
+		actual.searchParams.get("gl") === "nl"
+	)
+		actual.searchParams.delete("gl");
+	return [...actual.searchParams.keys()].every((name) => name === "q");
+}
+
 function boundItems(
 	id: string,
 	body: ProviderRequest,
@@ -81,7 +104,7 @@ function boundItems(
 		for (const raw of listing.items) {
 			const item = record(raw);
 			const cellId = identifier(item.custom_id);
-			if (!expected.has(cellId) || seen.has(cellId) || item.url !== expected.get(cellId))
+			if (!expected.has(cellId) || seen.has(cellId) || !matchesRequestUrl(item.url, expected.get(cellId)!))
 				throw new Error("provider_item_binding_mismatch");
 			seen.add(cellId);
 			result.push({ item, success });
