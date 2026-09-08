@@ -90,7 +90,7 @@ describe("bounded Olostep batch transport", () => {
 		const encoded: typeof fetch = async (url, init) => {
 			const response = await original(url, init);
 			if (!new URL(String(url)).pathname.endsWith("/items")) return response;
-			const payload = await response.json();
+			const payload = (await response.json()) as { items: { url: string }[] };
 			for (const item of payload.items) item.url = item.url.replaceAll("%20", "+") + (extra ? "&other=1" : "");
 			return Response.json(payload);
 		};
