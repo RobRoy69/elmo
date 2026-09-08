@@ -119,7 +119,14 @@ function parseOutcome(payload: Record<string, unknown>, item: Record<string, unk
 		typeof payload.json_content === "string" ? JSON.parse(payload.json_content) : payload.json_content;
 	const parsed = record(raw);
 	if (typeof parsed.prompt === "string" && parsed.prompt !== new URL(String(item.url)).searchParams.get("q"))
-		throw new Error("provider_prompt_mismatch");
+		return {
+			cellId: identifier(item.custom_id),
+			text: null,
+			citations: [],
+			modelVersion: "not_reported",
+			errorCode: "provider_prompt_mismatch",
+			raw,
+		};
 	const text =
 		typeof parsed.answer_markdown === "string" && parsed.answer_markdown.trim() ? parsed.answer_markdown : null;
 	return {

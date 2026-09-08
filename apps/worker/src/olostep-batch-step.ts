@@ -35,6 +35,12 @@ const models: Record<string, string> = {
 };
 
 export function collectionErrorCode(error: unknown): string {
+	const dbCode = error && typeof error === "object" && "code" in error ? error.code : null;
+	if (typeof dbCode === "string" && ["22P05", "22021", "22001", "54000", "42501", "23514", "57014"].includes(dbCode))
+		return `collection_db_${dbCode}`;
+	if (error instanceof SyntaxError) return "provider_json_invalid";
+	if (error instanceof TypeError) return "collection_type_error";
+	if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) return "provider_timeout";
 	const allowed = new Set([
 		"provider_payload_too_large",
 		"provider_http_failed",

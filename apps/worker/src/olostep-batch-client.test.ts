@@ -15,6 +15,7 @@ function transport(
 		conflictingId?: boolean;
 	} = {},
 ) {
+	const wrongPromptIndex = options.wrongPrompt ? 0 : -1;
 	const envelope = {
 		...(options.liveId ? { id: "batch-test" } : { batch_id: "batch-test" }),
 		...(options.conflictingId ? { id: "other-batch" } : {}),
@@ -35,7 +36,7 @@ function transport(
 			const index = Number(new URL(String(url)).searchParams.get("retrieve_id")!.split("-")[1]);
 			return Response.json({
 				json_content: JSON.stringify({
-					prompt: options.wrongPrompt ? "Other question" : `Vraag ${index + 1}`,
+					prompt: index === wrongPromptIndex ? "Other question" : `Vraag ${index + 1}`,
 					answer_markdown: options.missing ? " " : "DyReP answer",
 					sources: [{ url: "https://uncited.example/", cited: false }],
 				}),
@@ -70,8 +71,21 @@ describe("bounded Olostep batch transport", () => {
 		expect(outcomes?.every((item) => item.text === "DyReP answer" && item.citations.length === 0)).toBe(true);
 		expect(send.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
 	});
-	it.each([{ duplicate: true }, { wrongPrompt: true }])("rejects mismatched result evidence: %j", async (options) => {
+	it.each([{ duplicate: true }])("rejects mismatched result evidence: %j", async (options) => {
 		await expect(createOlostepBatchClient("test", transport(options)).collect("batch-test", body)).rejects.toThrow();
+	});
+	it("marks only a wrong-prompt cell failed and retains the valid answers without resubmitting", async () => {
+		const send = transport({ wrongPrompt: true });
+		const result = await createOlostepBatchClient("test", send).collect("batch-test", body);
+		expect(result).toHaveLength(4);
+		expect(result?.[0]).toMatchObject({
+			cellId: "cell-1",
+			errorCode: "provider_prompt_mismatch",
+			text: null,
+			citations: [],
+		});
+		expect(result?.slice(1).every((item) => item.errorCode === null && item.text === "DyReP answer")).toBe(true);
+		expect(send.mock.calls.every(([, init]) => init?.method === "GET")).toBe(true);
 	});
 	it("records missing answers as failures, not brand absence", async () => {
 		const result = await createOlostepBatchClient("test", transport({ missing: true })).collect("batch-test", body);
