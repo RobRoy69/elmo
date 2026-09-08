@@ -110,7 +110,7 @@ function boundItems(
 			result.push({ item, success });
 		}
 	}
-	if (seen.size !== 4) throw new Error("provider_items_incomplete");
+	if (seen.size !== body.items.length) throw new Error("provider_items_incomplete");
 	return result;
 }
 
@@ -133,7 +133,34 @@ function parseOutcome(payload: Record<string, unknown>, item: Record<string, unk
 }
 
 export function createOlostepBatchClient(apiKey: string, fetcher: typeof fetch = fetch): BatchProvider {
+	return boundedClient(apiKey, fetcher, 4);
+}
+
+export function perplexityDiagnosticRequest(): ProviderRequest {
+	return {
+		parser: { id: "@olostep/perplexity-results" },
+		country: "NL",
+		items: [
+			{
+				custom_id: "dyrep-perplexity-diagnostic-20260908",
+				url: `https://www.perplexity.ai/?q=${encodeURIComponent("Hoe kunnen we AI gebruiken zonder dat interne expertise losraakt van de oorspronkelijke bronnen?")}`,
+			},
+		],
+	};
+}
+
+export function createPerplexityDiagnosticClient(apiKey: string, fetcher: typeof fetch = fetch): BatchProvider {
+	return boundedClient(apiKey, fetcher, 1);
+}
+
+function boundedClient(apiKey: string, fetcher: typeof fetch, expectedItems: 1 | 4): BatchProvider {
 	if (!apiKey.trim()) throw new Error("provider_credential_required");
+	function validate(body: ProviderRequest) {
+		if (body.items.length !== expectedItems || new Set(body.items.map((item) => item.custom_id)).size !== expectedItems)
+			throw new Error("provider_matrix_invalid");
+		if (expectedItems === 1 && providerRequestHash(body) !== providerRequestHash(perplexityDiagnosticRequest()))
+			throw new Error("diagnostic_request_mismatch");
+	}
 	async function request(path: string, body?: ProviderRequest): Promise<Record<string, unknown>> {
 		// Never retry a POST: a lost response does not prove that creation failed.
 		const response = await fetcher(`https://api.olostep.com/v1/${path}`, {
@@ -162,12 +189,19 @@ export function createOlostepBatchClient(apiKey: string, fetcher: typeof fetch =
 	}
 	return {
 		async submit(body) {
+			validate(body);
 			return identifier((await request("batches", body)).id);
 		},
 		async collect(id, body) {
+			validate(body);
 			identifier(id);
 			const info = await request(`batches/${id}`);
-			if (info.id !== id || info.country !== body.country || info.parser !== body.parser.id || info.total_urls !== 4)
+			if (
+				info.id !== id ||
+				info.country !== body.country ||
+				info.parser !== body.parser.id ||
+				info.total_urls !== expectedItems
+			)
 				throw new Error("provider_binding_mismatch");
 			if (info.status !== "completed") {
 				if (["pending", "running", "processing", "in_progress"].includes(String(info.status))) return null;
