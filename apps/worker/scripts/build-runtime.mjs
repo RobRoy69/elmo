@@ -62,7 +62,11 @@ const netlify = process.argv.includes("--netlify");
 await build({
 	absWorkingDir: repoRoot,
 	entryPoints: netlify
-		? ["apps/worker/netlify/functions/dyrep-cell-background.mts", "apps/worker/netlify/functions/dyrep-cell-api.mts"]
+		? [
+				"apps/worker/netlify/functions/dyrep-cell-background.mts",
+				"apps/worker/netlify/functions/dyrep-cell-api.mts",
+				"apps/worker/netlify/functions/dyrep-perplexity-diagnostic.mts",
+			]
 		: ["apps/worker/src/index.ts"],
 	...(netlify
 		? {

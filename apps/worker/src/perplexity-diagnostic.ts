@@ -13,9 +13,23 @@ async function record(file: string, value: unknown) {
 	}
 }
 
+export interface DiagnosticJournal {
+	create(key: string, value: unknown): Promise<void>;
+	read(key: string): Promise<string>;
+}
+function journal(source: string | DiagnosticJournal): DiagnosticJournal {
+	return typeof source === "string"
+		? {
+				create: (key, value) => record(path.join(source, key), value),
+				read: (key) => readFile(path.join(source, key), "utf8"),
+			}
+		: source;
+}
+
 // One fixed journal per worker evidence directory. Even a lost POST response
 // leaves the exclusive intent file in place, so restart cannot submit again.
-export async function submitPerplexityDiagnostic(directory: string, provider: BatchProvider) {
+export async function submitPerplexityDiagnostic(directory: string | DiagnosticJournal, provider: BatchProvider) {
+	const store = journal(directory);
 	const request = perplexityDiagnosticRequest();
 	const intent = {
 		purpose: "diagnostic_only",
@@ -24,26 +38,27 @@ export async function submitPerplexityDiagnostic(directory: string, provider: Ba
 		requestHash: providerRequestHash(request),
 		createdAt: new Date().toISOString(),
 	};
-	await record(path.join(directory, "perplexity-intent.json"), intent);
+	await store.create("perplexity-intent.json", intent);
 	let id: string;
 	try {
 		id = await provider.submit(request);
 		if (!/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error("invalid_provider_id");
 	} catch {
-		await record(path.join(directory, "perplexity-unknown.json"), {
+		await store.create("perplexity-unknown.json", {
 			status: "outcome_unknown",
 			automatic_retry: false,
 		});
 		return { status: "outcome_unknown" };
 	}
-	await record(path.join(directory, "perplexity-submitted.json"), { id, requestHash: intent.requestHash });
+	await store.create("perplexity-submitted.json", { id, requestHash: intent.requestHash });
 	return { status: "submitted", id };
 }
 
-export async function collectPerplexityDiagnostic(directory: string, provider: BatchProvider) {
+export async function collectPerplexityDiagnostic(directory: string | DiagnosticJournal, provider: BatchProvider) {
+	const store = journal(directory);
 	const request = perplexityDiagnosticRequest();
-	const intent = JSON.parse(await readFile(path.join(directory, "perplexity-intent.json"), "utf8"));
-	const submitted = JSON.parse(await readFile(path.join(directory, "perplexity-submitted.json"), "utf8"));
+	const intent = JSON.parse(await store.read("perplexity-intent.json"));
+	const submitted = JSON.parse(await store.read("perplexity-submitted.json"));
 	if (
 		intent.requestHash !== providerRequestHash(request) ||
 		providerRequestHash(intent.request) !== intent.requestHash ||
@@ -52,7 +67,7 @@ export async function collectPerplexityDiagnostic(directory: string, provider: B
 		throw new Error("diagnostic_evidence_mismatch");
 	// A completed journal is immutable; repeated collection returns its receipt.
 	try {
-		const saved = JSON.parse(await readFile(path.join(directory, "perplexity-result.json"), "utf8"));
+		const saved = JSON.parse(await store.read("perplexity-result.json"));
 		if (
 			saved.requestHash !== intent.requestHash ||
 			saved.providerId !== submitted.id ||
@@ -76,6 +91,6 @@ export async function collectPerplexityDiagnostic(directory: string, provider: B
 		outcomes,
 		outcomeSha256: createHash("sha256").update(JSON.stringify(outcomes)).digest("hex"),
 	};
-	await record(path.join(directory, "perplexity-result.json"), result);
+	await store.create("perplexity-result.json", result);
 	return result;
 }
